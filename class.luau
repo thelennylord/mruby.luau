@@ -55,8 +55,8 @@ local function define_class_under(vm: VM, outer: Class, name: string, super: Cla
 end
 
 local function define_class(vm: VM?, name: string, super: Class): Class
-    -- if vm ~= nil and vm:get_register(1).type == "class" then
-    --     assert(vm.target_class == vm:get_register(1).value)
+    -- if vm ~= nil and vm:get_register(0).type == "class" then
+    --     assert(vm.target_class == vm:get_register(0).value)
         
     --     return define_class_under(vm, vm.target_class, name, super)
     -- end
@@ -138,43 +138,6 @@ local function instance_getiv(instance: Value, sym_id: number): Value
     return val
 end
 
--- Proc
-local function proc_new(vm: VM, irep: IREP, proc_type: string): Proc
-    local proc = {
-        type = proc_type,
-        irep = irep,
-        callinfo = vm.callinfo_tail
-    }
-
-    if proc_type == "block" and vm:get_register(1).type == "proc" then
-        proc.callinfo_self = vm:get_register(1).value.callinfo_self
-    else
-        proc.callinfo_self = vm.callinfo_tail
-    end
-
-    return proc :: any
-end
-
-local function proc_delete(val: Value)
-    assert(val.type == "proc")
-
-    val.value = nil :: any
-end
-
--- local function proc_get_top(proc: Proc): CallInfo?
---     local top: Proc
---     while true do
---         top = proc
---         if proc.type == "block" then
---             continue
---         end
-
---         return top.callinfo 
---     end
-
---     return nil
--- end
-
 local function obj_kind_of(instance: Value, cls: Class): boolean
     local c = find_class_by_object(instance)
     while c ~= nil do
@@ -234,8 +197,6 @@ return {
     instance_delete = instance_delete,
     instance_setiv = instance_setiv,
     instance_getiv = instance_getiv,
-    proc_new = proc_new,
-    proc_delete = proc_delete,
     obj_kind_of = obj_kind_of,
     find_method = find_method,
     get_class_by_name = get_class_by_name,

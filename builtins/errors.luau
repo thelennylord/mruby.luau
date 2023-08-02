@@ -8,26 +8,27 @@ local objectClass = require("builtins/object")
 
 type VM = types.VM
 type Value = types.Value
+type State = types.State
 
 local Exception = class.define_class(nil, "Exception", objectClass)
 
-class.define_method(Exception, "new", function(vm: VM, argc: number)
-    local val1 = vm:get_register(1)
+class.define_method(Exception, "new", function(state: State, argc: number)
+    local val1 = state.get_register(0)
     assert(val1.type == "class")
 
     local ret: Value
-    if argc == 1 and vm:get_register(2).type == "string" then
-        local str = vm:get_register(2).value
-        ret = error.exception_new(vm, val1.value, str)
+    if argc == 1 and state.get_register(1).type == "string" then
+        local str = state.get_register(1).value
+        ret = error.exception_new(state.vm, val1.value, str)
     else
-        ret = error.exception_new(vm, val1.value, "")
+        ret = error.exception_new(state.vm, val1.value, "")
     end
 
-    vm:set_register(1, ret)
+    state.set_register(0, ret)
 end)
 
-class.define_method(Exception, "message", function(vm: VM, argc: number)
-    local val1 = vm:get_register(1)
+class.define_method(Exception, "message", function(state: State, argc: number)
+    local val1 = state.get_register(0)
     assert(val1.type == "exception")
 
     local ret: Value
@@ -37,7 +38,7 @@ class.define_method(Exception, "message", function(vm: VM, argc: number)
         ret = value.autocast(symbol.symid_to_str(val1.value.class.sym_id))
     end
 
-    vm:set_register(1, ret)
+    state.set_register(0, ret)
 end)
 
 local exports = {}

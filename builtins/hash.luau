@@ -9,10 +9,11 @@ local object_class = require("builtins/object")
 type VM = types.VM
 type Value = types.Value
 type Hash = types.Hash
+type State = types.State
 
-local Hash = class.define_class(nil, "Array", object_class)
+local Hash = class.define_class(nil, "Hash", object_class)
 
-class.define_method(Hash, "new", function(vm: VM, argc: number)
+class.define_method(Hash, "new", function(state: State, argc: number)
     local new_hash: Hash = {
         class = Hash,
         ivar = keyvalue.new(),
@@ -21,14 +22,14 @@ class.define_method(Hash, "new", function(vm: VM, argc: number)
 
     -- Hash.new()
     if argc == 0 then
-        vm:set_register(1, {
+        state.set_register(0, {
             type = "hash",
             value = new_hash
         })
         return
     end
 
-    err.raise(vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
+    err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
 end)
 
 return Hash

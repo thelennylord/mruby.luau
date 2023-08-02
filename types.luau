@@ -3,7 +3,13 @@
 -- Made to avoid cyclic dependency
 
 --type class.luau
-export type LuaMethod = (vm: VM, argc: number) -> ()
+export type State = {
+    get_register: (register: number) -> Value,
+    set_register: (register: number, val: Value) -> (),
+    vm: VM,
+    current_self_idx: number
+}
+export type LuaMethod = (state: State, argc: number) -> ()
 
 export type Method = { 
     sym_id: number, 
@@ -58,7 +64,8 @@ export type Proc = {
     callinfo: CallInfo,
     callinfo_self: CallInfo,
     irep: IREP,
-    ret_val: Value?
+    ret_val: Value?,
+    class: Class
 }
 --end
 
@@ -86,7 +93,7 @@ export type CallInfo = {
     prev: CallInfo?,
     current_irep: IREP,
     inst_idx: number,
-    current_reg_idx: number,
+    current_self_idx: number,
     target_class: Class,
 
     own_class: Class?,
@@ -108,13 +115,12 @@ export type VM = {
     inst: BinaryStream, -- pointer to instruction in binary stream
     target_class: Class,
     reg_size: number,
-    current_reg_idx: number,
+    current_self_idx: number,
     registers: { Value },
-
     return_value: Value?,
     target_callinfo: CallInfo?,
-
     exception: Value,
+    debug_mode: boolean,
 
     -- Methods
     -- Gets the register relative to current_reg (Indexing begins from 1 just like lua)
