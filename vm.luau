@@ -1172,10 +1172,10 @@ function execute.op_break(vm: VM, ext: number)
 
     -- Break returns the block and the caller calling the block (verify)
     local target_callinfo = proc.callinfo.prev
-    if target_callinfo == nil then
-        err.raise(vm, error_class.LocalJumpError, "unexpected break")
-        return
-    end
+    -- if target_callinfo == nil then
+    --     err.raise(vm, error_class.LocalJumpError, "unexpected break3")
+    --     return
+    -- end
 
     -- Loop for handling ensure
     while vm.callinfo_tail ~= nil or vm.callinfo_tail ~= target_callinfo do
@@ -1189,7 +1189,8 @@ function execute.op_break(vm: VM, ext: number)
         vm:pop_callinfo()
     end
 
-    err.raise(vm, error_class.LocalJumpError, "unexpected break")
+    
+    --err.raise(vm, error_class.LocalJumpError, "unexpected break")
 end
 
 -- R[a] = block (16=m5:r1:m5:d1:lv4)
