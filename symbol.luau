@@ -1,7 +1,7 @@
 --!strict
 local types = require("types")
 
-type Symbol = types.Symbol
+type Symbol = string
 
 -- Map of string -> symbol_id (aka the index)
 local str_symid_map: { [Symbol]: number } = {}

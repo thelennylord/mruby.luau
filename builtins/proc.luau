@@ -10,8 +10,8 @@ type State = types.State
 
 local Proc = class.define_class(nil, "Proc", object_class)
 
-class.define_method(Proc, "new", function(state: State, argc: number)
-    error("Proc.new not implemented")
+class.define_method(Proc, "initialize", function(state: State, argc: number)
+    error("Proc intialization not implemented")
 end)
 
 class.define_method(Proc, "call", function(state: State, argc: number)

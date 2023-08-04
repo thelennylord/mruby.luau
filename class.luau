@@ -9,42 +9,111 @@ type VM = types.VM
 type Value = types.Value
 type LuaMethod = types.LuaMethod
 type Method = types.Method
-type Instance = types.Instance
+type Object = types.Object
 type IREP = types.IREP
 type Proc = types.Proc
 type CallInfo = types.CallInfo
+type Array = types.Array
+type String = types.String
+type Range = types.Range
+type Integer = types.Integer
+type Float = types.Float
+type Hash = types.Hash
+type Exception = types.Exception
 
-local function find_class_by_object(val: Value): Class
-    if val.type == "class" then
-        return val.value
-    
-    elseif val.type == "integer" or val.type == "float" or val.type == "symbol" then
-        error("numeric/symbol class not implemented")
-    end
+-- Predefine builtin classes
+local BasicObject: Class = {
+    name = "BasicObject",
+    sym_id = symbol.str_to_symid("BasicObject"),
+    is_singleton = false,
+    attached_object = nil,
+    superclass = nil :: any,
+    cvar = keyvalue.new(),
+    ivar = keyvalue.new(),
+    methods = {},
+    definitions = {},
+    subclasses = {},
+    class = nil :: any
+}
 
-    return val.value.class
-end
+local Object: Class = {
+    name = "Object",
+    sym_id = symbol.str_to_symid("Object"),
+    is_singleton = false,
+    attached_object = nil,
+    superclass = BasicObject,
+    cvar = BasicObject.cvar,
+    ivar = keyvalue.new(),
+    methods = {},
+    definitions = {},
+    subclasses = {},
+    class = nil :: any
+}
+
+local Class: Class = {
+    name = "Class",
+    sym_id = symbol.str_to_symid("Class"),
+    is_singleton = false,
+    attached_object = nil,
+    superclass = Object,
+    cvar = Object.cvar,
+    ivar = keyvalue.new(),
+    methods = {},
+    definitions = {},
+    subclasses = {},
+    class = nil :: any
+}
+
+-- Set their classes to Class 
+BasicObject.class = Class
+Object.class = Class
+Class.class = Class
+
+-- and save them to the consts table
+global.consts.set(BasicObject.sym_id, {
+    type = "class",
+    value = BasicObject
+})
+
+global.consts.set(Object.sym_id, {
+    type = "class",
+    value = Object
+})
+
+global.consts.set(Class.sym_id, {
+    type = "class",
+    value = Class
+})
 
 local function define_class_under(vm: VM, outer: Class, name: string, super: Class): Class
     assert(outer ~= nil)
     assert(name ~= nil)
-    assert(super ~= nil)
     
     local sym_id = symbol.str_to_symid(name)
     local val = global.consts.get_class(outer, sym_id)
-
+    
     if val ~= nil then
         assert(val.type == "class")
         return val.value
     end
 
+    assert(super ~= nil)
+
     local class: Class = {
+        name = name,
         sym_id = sym_id,
-        super = super,
+        is_singleton = false,
+        attached_object = nil,
+        superclass = super,
         cvar = if super then super.cvar else keyvalue.new(),
+        ivar = keyvalue.new(),
         methods = {},
-        name = name
+        definitions = {},
+        subclasses = {},
+        class = Class
     }
+
+    table.insert(super.subclasses, class)
 
     global.consts.set_class(outer, sym_id, {
         type = "class",
@@ -55,37 +124,89 @@ local function define_class_under(vm: VM, outer: Class, name: string, super: Cla
 end
 
 local function define_class(vm: VM?, name: string, super: Class): Class
+    assert(name ~= nil)
+
     -- if vm ~= nil and vm:get_register(0).type == "class" then
     --     assert(vm.target_class == vm:get_register(0).value)
         
     --     return define_class_under(vm, vm.target_class, name, super)
     -- end
-    assert(name ~= nil)
-    if name ~= "Object" then
-        assert(super ~= nil)
-    end
-
+    
     local sym_id = symbol.str_to_symid(name)
     local val = global.consts.get(sym_id)
     if val ~= nil then
-        assert(val.type == "class")        
+        assert(val.type == "class")
         return val.value
     end
+    
+    assert(super ~= nil)
 
-    local cls: Class = {
+    local class: Class = {
+        name = name,
         sym_id = sym_id,
-        super = super,
-        cvar = if super then super.cvar else keyvalue.new(),
-        methods = {},
-        name = name
+        is_singleton = false,
+        attached_object = nil,
+        superclass = super,
+        cvar = super.cvar, -- TODO Make this compliant with CRuby
+        ivar = keyvalue.new(),
+        methods = Class.definitions,
+        subclasses = {},
+        definitions = {},
+        class = Class
     }
+
+    table.insert(super.subclasses, class)
 
     global.consts.set(sym_id, {
         type = "class",
-        value = cls
+        value = class
     })
 
+    return class
+end
+
+local function get_class(obj: Object): Class
+    local cls = obj.class
+    while cls.is_singleton == true do
+        cls = cls.superclass
+    end
+
     return cls
+end
+
+local function get_class_from_name(name: string): Class?
+    local val = global.consts.get(symbol.str_to_symid(name))
+    if val ~= nil then
+        return val.value
+    end
+
+    return nil
+end
+
+local function get_singleton_class(obj: Object): Class
+    local cls = obj.class
+    if cls.is_singleton then
+        return cls
+    end
+
+    -- Make singleton_class
+    local singleton_class: Class = {
+        name = cls.name,
+        sym_id = cls.sym_id,
+        is_singleton = true,
+        attached_object = obj,
+        superclass = cls,
+        cvar = cls.cvar,
+        ivar = keyvalue.new(),
+        subclasses = cls.subclasses,
+        methods = cls.definitions,
+        definitions = {},
+        class = Class
+    }
+
+    obj.class = singleton_class
+    obj.methods = singleton_class.definitions
+    return singleton_class
 end
 
 local function define_method(cls: Class, name: string, luafunc: LuaMethod)
@@ -98,25 +219,65 @@ local function define_method(cls: Class, name: string, luafunc: LuaMethod)
         value = luafunc
     } 
 
-    cls.methods[sym_id] = method
+    cls.definitions[sym_id] = method
 end
 
-local function instance_new(cls: Class): { type: "object", value: Instance }
-    local instance: Instance = {
+local function obj_kind_of(obj: Object, cls: Class): boolean
+    local c = obj.class
+    while c ~= nil do
+        if c.name == cls.name then
+            return true
+        end
+        
+        c = c.superclass
+    end
+    
+    return false
+end
+
+-- note: this is same as calling :allocate
+local function instance_new(cls: Class): { type: "object", value: Object }
+    local instance: Object = {
         class = cls,
-        data = {},
+        methods = cls.definitions,
         ivar = keyvalue.new()
     }
 
-    return {
-        type = "object",
-        value = instance
-    }
-end
+    local obj_type = "object"
+    if obj_kind_of(instance, get_class_from_name("Array") :: Class) then
+        obj_type = "array"
+        (instance :: Array).array = {}
 
-local function instance_delete(val: Value)
-    assert(val.type == "object")
-    table.clear(val.value)
+    elseif obj_kind_of(instance, get_class_from_name("Hash") :: Class) then
+        obj_type = "hash"
+        (instance :: Hash).hash = {}
+
+    elseif obj_kind_of(instance, get_class_from_name("String") :: Class) then
+        obj_type = "string"
+        (instance :: String).str = ""
+
+    elseif obj_kind_of(instance, get_class_from_name("Proc") :: Class) then
+        obj_type = "proc"
+        (instance :: Proc).type = "block"
+
+    elseif obj_kind_of(instance, get_class_from_name("Array") :: Class) then
+        obj_type = "range"
+        (instance :: Range).start = 0
+        (instance :: Range).stop = 0
+
+    elseif obj_kind_of(instance, get_class_from_name("Exception") :: Class) then
+        obj_type = "exception"
+        (instance :: Exception).call_nest = {}
+        (instance :: Exception).method_id = 0
+        (instance :: Exception).message = ""
+    end
+
+    -- TODO Error for Integer, Class
+
+    return {
+        type = obj_type,
+        value = instance
+    } :: any
 end
 
 local function instance_setiv(instance: Value, sym_id: number, val: Value)
@@ -124,50 +285,45 @@ local function instance_setiv(instance: Value, sym_id: number, val: Value)
     instance.value.ivar[sym_id] = val
 end
 
-local function instance_getiv(instance: Value, sym_id: number): Value
+local function instance_getiv(instance: Value, sym_id: number): Value?
     assert(instance.type == "object")
 
-    local val = instance.value.ivar[sym_id]
-    if not val then
-        return {
-            type = "nil",
-            value = nil
-        }
-    end
-
-    return val
+    return instance.value.ivar[sym_id]
 end
 
-local function obj_kind_of(instance: Value, cls: Class): boolean
-    local c = find_class_by_object(instance)
-    while c ~= nil do
-        if c == cls then
-            return true
-        end
-        c = c.super
+local function get_method(obj: Object, sym_id: number): Method?
+    local method = obj.methods[sym_id]
+    if method then
+        return method
     end
 
-    return false
-end
-
-local function find_method(cls: Class, sym_id: number): Method?
-    while cls ~= nil do
-        local method = cls.methods[sym_id]
-        if method then
-            return method
-        end
-
-        cls = cls.super
+    local cls = obj.class
+    while method == nil and cls ~= nil do
+        method = cls.definitions[sym_id]
+        cls = cls.superclass
     end
 
-    return nil
+    return method
 end
 
 local function undefine_method(cls: Class, sym_id: number)
     while cls ~= nil do
         cls.methods[sym_id] = nil
-        cls = cls.super
+        cls = cls.superclass
     end
+end
+
+local function alias_method(cls: Class, alias_name: string, method_name: string)
+    local method_id = symbol.str_to_symid(method_name)
+    local alias_id = symbol.str_to_symid(alias_name)
+
+    local method = get_method( { class = cls, methods = cls.definitions } :: Object, method_id)
+    if method == nil then
+        error(`undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
+        return
+    end
+
+    cls.definitions[alias_id] = method
 end
 
 local function get_class_by_name(name: string): Class?
@@ -189,17 +345,18 @@ local function get_class_by_name(name: string): Class?
 end
 
 return {
-    find_class_by_object = find_class_by_object,
     define_class = define_class,
     define_class_under = define_class_under,
     define_method = define_method,
     instance_new = instance_new,
-    instance_delete = instance_delete,
     instance_setiv = instance_setiv,
     instance_getiv = instance_getiv,
     obj_kind_of = obj_kind_of,
-    find_method = find_method,
     get_class_by_name = get_class_by_name,
     undefine_method = undefine_method,
-    --proc_get_top= proc_get_top
+    get_method = get_method,
+    get_class = get_class,
+    get_singleton_class = get_singleton_class,
+    get_class_from_name = get_class_from_name,
+    alias_method = alias_method,
 }

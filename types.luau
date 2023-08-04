@@ -6,6 +6,7 @@
 export type State = {
     get_register: (register: number) -> Value,
     set_register: (register: number, val: Value) -> (),
+    send_by_name: (sym_id: number, A: number, C: number, super: boolean) -> (),
     vm: VM,
     current_self_idx: number
 }
@@ -21,52 +22,72 @@ export type Method = {
     value: LuaMethod 
 }
 
-export type Class = {
+export type Instance = unknown
+
+export type Class = Object & {
     name: string,
     sym_id: number,
-    super: Class,
+    is_singleton: boolean,
+    attached_object: Object?, -- not nil if is_singleton == true
+    superclass: Class,
+    subclasses: { Class },
     cvar: KeyValue,
-    methods: { [number]: Method }
+    definitions: { [number]: Method } -- new_obj.methods = definitions when :new is sent
 }
 
-export type Instance = {
-    class: Class,
-    ivar: KeyValue
+export type Object = {
+    ivar: KeyValue,
+    methods: { [number]: Method },
+    class: Class
 }
 
-export type String = Instance & {
+export type String = Object & {
     str: string
 }
 
-export type Range = Instance & {
-    start: number,
-    stop: number,
+export type Range = Object & {
     iter_idx: number
-}
+} & (
+    {
+        start: number,
+        stop: number?
+    } 
+    | {
+        start: number?,
+        stop: number
+    }
+)
 
-export type Integer = Instance & {
-    num: number
+export type Integer = Object & {
+    number: number
 }
 
 export type Float = Integer
 
-export type Array = Instance & {
+export type Array = Object & {
     array: { Value }
 }
 
 type HashKey = string | boolean | number | Value
-export type Hash = Instance & {
+export type Hash = Object & {
     hash: { [HashKey]: Value }
 }
 
-export type Proc = {
+export type Proc = Object & {
     type: "lambda" | "block" | "method",
     callinfo: CallInfo,
     callinfo_self: CallInfo,
     irep: IREP,
-    ret_val: Value?,
-    class: Class
 }
+
+export type Symbol = Object & {
+    sym_id: number,
+    sym_str: string
+}
+
+export type TrueClass = Object
+export type FalseClass = Object
+export type NilClass = Object 
 --end
 
 --types vm.luau
@@ -112,7 +133,7 @@ export type VM = {
     top_irep: IREP,
     current_irep: IREP,
     callinfo_tail: CallInfo?,
-    inst: BinaryStream, -- pointer to instruction in binary stream
+    inst: ByteStream, -- pointer to instruction in binary stream
     target_class: Class,
     reg_size: number,
     current_self_idx: number,
@@ -121,6 +142,7 @@ export type VM = {
     target_callinfo: CallInfo?,
     exception: Value,
     debug_mode: boolean,
+    ext: number,
 
     -- Methods
     -- Gets the register relative to current_reg (Indexing begins from 1 just like lua)
@@ -128,31 +150,38 @@ export type VM = {
     set_register: (self: VM, register: number, value: Value) -> (),
     push_callinfo: (self: VM, method_id: number, reg_offset: number, num_args: number) -> CallInfo,
     pop_callinfo: (self: VM) -> (),
-    send_by_name: (self: VM, sym_id: number, A: number, C: number, super_called: boolean?) -> (),
+    send_by_name: (self: VM, sym_id: number, A: number, C: number, super_called: boolean?, __wait_until_done: boolean?) -> (), -- __wait_until_done is used internally, do not use!
     get_self: (self: VM) -> Value,
     get_catch_handler: (self: VM, handler_type: string) -> CatchHandler?,
+    read_instruction: (self: VM) -> ("continue" | "stop" | "error")
 }
 --end
 
 --type value.luau
 export type Value = {
-    type: "integer" | "float" | "symbol",
-    value: number
+    type: "integer",
+    value: Integer
 } | {
-    type: "true" | "false",
-    value: boolean
+    type: "float",
+    value: Float
+} | {
+    type: "symbol",
+    value: Symbol
+} | {
+    type: "true",
+    value: TrueClass
+} | {
+    type: "false",
+    value: FalseClass
 } | {
     type: "nil",
-    value: nil
+    value: NilClass
 } | {
     type: "object",
-    value: Instance
+    value: Object
 } | {
     type: "class",
     value: Class
-} | {
-    type: "instance",
-    value: Instance
 } | {
     type: "proc",
     value: Proc
@@ -173,12 +202,8 @@ export type Value = {
     value: Exception
 } | {
     type: "empty",
-    value: nil
+    value: unknown
 }
---end
-
---type symbol.luau
-export type Symbol = string
 --end
 
 --type keyvalue.luau
@@ -187,7 +212,7 @@ export type KeyValue = { [sym_id]: Value }
 --end
 
 --type error.luau
-export type Exception = Instance & {
+export type Exception = Object & {
     method_id: sym_id?,
     message: string,
     call_nest: { sym_id }
@@ -195,13 +220,13 @@ export type Exception = Instance & {
 --
 
 --type stream.luau
-export type BinaryStream = {
+export type ByteStream = {
     cursor: number,
 
-    read_byte: (self: BinaryStream, bytes: number?) -> number,
-    read_string: (self: BinaryStream, length: number?) -> string,
-    skip: (self: BinaryStream, bytes: number) -> (),
-    length: (self: BinaryStream) -> number,
+    read_byte: (self: ByteStream, bytes: number?) -> number,
+    read_string: (self: ByteStream, length: number?) -> string,
+    skip: (self: ByteStream, bytes: number) -> (),
+    length: (self: ByteStream) -> number,
 }
 --
 

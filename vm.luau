@@ -6,13 +6,21 @@ local symbol = require("symbol")
 local global = require("global")
 local class = require("class")
 local keyvalue = require("keyvalue")
-local hash_class = require("builtins/hash")
-local array_class = require("builtins/array")
 local err = require("error")
+
+local array_class = require("builtins/array")
 local error_class = require("builtins/errors")
 local string_class = require("builtins/string")
 local object_class = require("builtins/object")
 local proc_class = require("builtins/proc")
+local hash_class = require("builtins/hash")
+local _class_class = require("builtins/class")
+local _symbol_class = require("builtins/symbol")
+local _integer_class = require("builtins/integer")
+local _float_class = require("builtins/float")
+local _nilclass_class = require("builtins/nilclass")
+local _trueclass_class = require("builtins/trueclass")
+local _falseclass_class = require("builtins/falseclass")
 
 type VM = types.VM
 type IREP = types.IREP
@@ -25,9 +33,9 @@ type String = types.String
 type Exception = types.Exception
 type Class = types.Class
 type CatchHandler = types.CatchHandler
-type BinaryStream = types.BinaryStream
+type ByteStream = types.ByteStream
 
-local function free_idx(tbl)
+local function free_idx(tbl: { any }): number
     for i = 1, #tbl do
         if tbl[i] == nil then
             return i
@@ -45,21 +53,20 @@ local function signed_int16(num: number): number
     return num
 end
 
-local function proc_new(vm: VM, irep: IREP, proc_type: string): Proc
-    local proc = {
-        type = proc_type,
-        irep = irep,
-        callinfo = vm.callinfo_tail,
-        class = proc_class
-    }
+local function proc_new(vm: VM, irep: IREP, proc_type: "block" | "lambda" | "method"): Proc
+    local val = class.instance_new(proc_class)
+    local proc = val.value :: Proc
+    proc.type = proc_type
+    proc.irep = irep
+    proc.callinfo = vm.callinfo_tail :: CallInfo
 
     if proc_type == "block" and vm:get_register(0).type == "proc" then
         proc.callinfo_self = vm:get_register(0).value.callinfo_self
     else
-        proc.callinfo_self = vm.callinfo_tail
+        proc.callinfo_self = vm.callinfo_tail :: CallInfo
     end
 
-    return proc :: any
+    return proc
 end
 
 local vm_map = {}
@@ -68,16 +75,18 @@ local vm_map = {}
 local VM = {}
 VM.__index = VM
 
-function VM.new(debug_mode: boolean)
+function VM.new(debug_mode: boolean?): VM
+    debug_mode = if debug_mode == nil then false else debug_mode
+
     local self = {
         id = -1,
         debug_mode = debug_mode or false,
         should_stop = false,
         exception = value.autocast(nil),
-        current_self_idx = 1
+        current_self_idx = 1,
     }
 
-    return setmetatable(self, VM)
+    return setmetatable(self, VM) :: any
 end
 
 function VM.open(vm: VM)
@@ -87,7 +96,7 @@ function VM.open(vm: VM)
     vm.id = id
 end
 
-function VM.load(vm: VM, stream: BinaryStream, irep: IREP)
+function VM.load(vm: VM, stream: ByteStream, irep: IREP)
     assert(stream ~= nil)
     assert(irep ~= nil)
 
@@ -100,6 +109,7 @@ function VM.load(vm: VM, stream: BinaryStream, irep: IREP)
     vm.current_self_idx = 1
     vm.exception = value.autocast(nil)
     vm.inst = stream
+    vm.ext = 0
 
     stream.cursor = irep.inst_idx
 end
@@ -161,7 +171,10 @@ end
 local CALL_MAXARGS = 15
 function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_super: boolean)
     assert(sym_id ~= nil)
-    call_super = call_super or false
+    assert(A ~= nil)
+    assert(C ~= nil)
+
+    call_super = if call_super == nil then false else call_super
     -- OP_SEND:
     --     R[a] = R[a].send(Syms[b], R[a+1].., R[a+n+1]:R[a+n+2]..) (c = n|k<<4)
 
@@ -185,11 +198,8 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
     local kw_start = if num_args == CALL_MAXARGS then vm.current_self_idx + A + 2 else vm.current_self_idx + A + num_args + 1
     if num_kwargs > 0 then
         if num_kwargs ~= CALL_MAXARGS then
-            local kw_hash: Hash = {
-                class = hash_class,
-                ivar = keyvalue.new(),
-                hash = {}
-            }
+            local hash_val = class.instance_new(hash_class)
+            local kw_hash = hash_val.value :: Hash
 
             for i = 1, num_kwargs do
                 local key = vm.registers[kw_start + i - 1]
@@ -205,10 +215,7 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
                 end
             end
 
-            table.insert(args, {
-                type = "hash",
-                value = kw_hash
-            })
+            table.insert(args, hash_val)
         else
             table.insert(args, vm.registers[kw_start])
         end
@@ -226,11 +233,11 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
 
     table.move(args, 1, #args, vm.current_self_idx + A + 1, vm.registers)
 
-    local obj = vm:get_register(A)
-    local cls = class.find_class_by_object(obj)
-    
+    local obj = vm:get_register(A).value
+
+    local cls = class.get_class(obj)
     if call_super then
-        cls = cls.super
+        obj = class.get_class(cls.superclass)
         --assert(cls ~= nil)
         if cls == nil then
             -- Normally this shouldn't happen
@@ -239,7 +246,7 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
         end
     end
 
-    local method = class.find_method(cls, sym_id)
+    local method = class.get_method(obj, sym_id)
     if not method then
         err.raise(vm, error_class.NoMethodError, `undefined local variable or method '{symbol.symid_to_str(sym_id)}' for {cls.name}`)
         
@@ -263,6 +270,10 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
                 assert(register >= 0)
                 assert(val ~= nil)
                 vm.registers[curr_idx + register] = val
+            end,
+
+            send_by_name = function(sym_id: number, A: number, C: number, super: boolean?)
+                vm:send_by_name(sym_id, curr_idx + A, C)
             end,
 
             vm = vm,
@@ -290,6 +301,8 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
     vm.current_irep = method.value
     vm.inst.cursor = method.value.inst_idx
     vm.current_self_idx += A
+
+    -- TODO call ruby code from lua and get its return value, but how?
 end
 
 function VM.push_callinfo(vm: VM, method_id: number?, reg_offset: number, num_args: number): CallInfo
@@ -317,7 +330,7 @@ function VM.pop_callinfo(vm: VM)
     assert(vm.callinfo_tail ~= nil)
 
     -- Clear used registers
-    for i = vm.current_self_idx + 1, vm.current_irep.num_regs do
+    for i = vm.current_self_idx + 1, #vm.registers do
         vm.registers[i] = nil
     end
     
@@ -782,7 +795,7 @@ function execute.op_rescue(vm: VM, ext: number)
     assert(val1.type == "exception")
     assert(val2.type == "class")
 
-    local ret = class.obj_kind_of(val1, val2.value)
+    local ret = class.obj_kind_of(val1.value, val2.value)
     vm:set_register(B, value.autocast(ret))
 end
 
@@ -914,11 +927,8 @@ function execute.op_enter(vm: VM, ext: number)
     if should_rest then
         -- Collect remaining values and put them in an array,
         -- until we reach a Hash, Proc or NilClass
-        local new_arr: Array = {
-            class = array_class,
-            ivar = keyvalue.new(),
-            array = {}
-        }
+        local new_arr_val = class.instance_new(array_class)
+        local new_arr = new_arr_val.value :: Array
 
         do
             local i = reg_idx
@@ -934,10 +944,7 @@ function execute.op_enter(vm: VM, ext: number)
             end
         end
 
-        vm:set_register(reg_idx, {
-            type = "array",
-            value = new_arr
-        })
+        vm:set_register(reg_idx, new_arr_val)
         reg_idx += 1
 
         -- Extract m2 arguments
@@ -1005,7 +1012,7 @@ function execute.op_key_p(vm: VM, ext: number)
     local sym_id = vm.current_irep.syms[B + 1]
 
     for _, v in kdict.value.hash do
-        if v.type == "symbol" and v.value == sym_id then
+        if v.type == "symbol" and v.value.sym_id == sym_id then
             vm:set_register(A, value.autocast(true))
             return
         end
@@ -1041,7 +1048,7 @@ function execute.op_karg(vm: VM, ext: number)
     local sym_id = vm.current_irep.syms[B + 1]
     local ret: Value?
     for k, v in kdict.value.hash do
-        if v.type == "symbol" and v.value == sym_id then
+        if v.type == "symbol" and v.value.sym_id == sym_id then
             ret = v
             kdict.value.hash[k] = nil
             break
@@ -1238,17 +1245,16 @@ function execute.op_add(vm: VM, ext: number)
 
     if val1.type == "integer" then 
         if val2.type == "integer" then
-            val1.value += val2.value
+            vm:set_register(A, value.autocast(val1.value.number + val2.value.number, "integer"))
             return
 
         elseif val2.type == "float" then
-            val1.value += val2.value
-            val1.type = "float"
+            vm:set_register(A, value.autocast(val1.value.number + val2.value.number, "float"))
             return
         end
         
     elseif val1.type == "float" and (val2.type == "integer" or val2.type == "float") then
-        val1.value += val2.value
+        vm:set_register(A, value.autocast(val1.value.number + val2.value.number, "float"))
         return
     end
 
@@ -1261,10 +1267,9 @@ function execute.op_addi(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
     
     local val1 = vm:get_register(A)
-    local val2 = value.autocast(B, "integer")
 
     if val1.type == "integer" or val1.type == "float" then 
-        val1.value += val2.value
+        vm:set_register(A, value.autocast(val1.value.number + B, val1.type))
         return
     end
 
@@ -1282,17 +1287,16 @@ function execute.op_sub(vm: VM, ext: number)
 
     if val1.type == "integer" then 
         if val2.type == "integer" then
-            val1.value -= val2.value
+            vm:set_register(A, value.autocast(val1.value.number - val2.value.number, "integer"))
             return
 
         elseif val2.type == "float" then
-            val1.value -= val2.value
-            val1.type = "float"
+            vm:set_register(A, value.autocast(val1.value.number - val2.value.number, "float"))
             return
         end
         
     elseif val1.type == "float" and (val2.type == "integer" or val2.type == "float") then
-        val1.value -= val2.value
+        vm:set_register(A, value.autocast(val1.value.number - val2.value.number, "float"))
         return
     end
 
@@ -1326,17 +1330,16 @@ function execute.op_mul(vm: VM, ext: number)
 
     if val1.type == "integer" then 
         if val2.type == "integer" then
-            val1.value *= val2.value
+            vm:set_register(A, value.autocast(val1.value.number * val2.value.number, "integer"))
             return
 
         elseif val2.type == "float" then
-            val1.value *= val2.value
-            val1.type = "float"
+            vm:set_register(A, value.autocast(val1.value.number * val2.value.number, "float"))
             return
         end
         
     elseif val1.type == "float" and (val2.type == "integer" or val2.type == "float") then
-        val1.value *= val2.value
+        vm:set_register(A, value.autocast(val1.value.number * val2.value.number, "float"))
         return
     end
 
@@ -1351,24 +1354,23 @@ function execute.op_div(vm: VM, ext: number)
     local val1 = vm:get_register(A)
     local val2 = vm:get_register(A + 1)
 
-    if (val2.type == "integer" or val2.type == "float") and val2.value == 0 then
+    if (val2.type == "integer" or val2.type == "float") and val2.value.number == 0 then
         err.raise(vm, error_class.ZeroDivisionError, `divided by 0`)
         return
     end
 
     if val1.type == "integer" then 
         if val2.type == "integer" then
-            val1.value /= val2.value
+            vm:set_register(A, value.autocast(val1.value.number / val2.value.number, "integer"))
             return
 
         elseif val2.type == "float" then
-            val1.value /= val2.value
-            val1.type = "float"
+            vm:set_register(A, value.autocast(val1.value.number / val2.value.number, "float"))
             return
         end
         
     elseif val1.type == "float" and (val2.type == "integer" or val2.type == "float") then
-        val1.value /= val2.value
+        vm:set_register(A, value.autocast(val1.value.number / val2.value.number, "float"))
         return
     end
 
@@ -1455,21 +1457,15 @@ end
 function execute.op_array(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local new_arr: Array = {
-        class = array_class,
-        ivar = keyvalue.new(),
-        array = {}
-    }
+    local new_arr_val = class.instance_new(array_class)
+    local new_arr = new_arr_val.value :: Array
 
     for i = A, A + B do
         table.insert(new_arr.array, vm:get_register(i))
         vm:set_register(i, nil :: any)
     end
 
-    vm:set_register(A, {
-        type = "array",
-        value = new_arr
-    })
+    vm:set_register(A, new_arr_val)
 end
 
 -- R[a] = ary_new(R[b],R[b+1]..R[b+c])
@@ -1477,21 +1473,15 @@ end
 function execute.op_array2(vm: VM, ext: number)
     local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
 
-    local new_arr: Array = {
-        class = array_class,
-        ivar = keyvalue.new(),
-        array = {}
-    }
+    local new_arr_val = class.instance_new(array_class)
+    local new_arr = new_arr_val.value :: Array
 
-    for i = B, C do
+    for i = B, B + C do
         table.insert(new_arr.array, vm:get_register(i))
         vm:set_register(i, nil :: any)
     end
 
-    vm:set_register(A, {
-        type = "array",
-        value = new_arr
-    })
+    vm:set_register(A, new_arr_val)
 end
 
 -- ary_cat(R[a],R[a+1])
@@ -1530,16 +1520,11 @@ function execute.op_arydup(vm: VM, ext: number)
     local val1 = vm:get_register(A)
     assert(val1.type == "array")
 
-    local new_arr: Array = {
-        class = array_class,
-        ivar = keyvalue.new(),
-        array = table.clone(val1.value.array)
-    }
+    local new_arr_val = class.instance_new(array_class)
+    local new_arr = new_arr_val.value :: Array
+    new_arr.array = table.clone(val1.value.array)
 
-    return vm:set_register(A, {
-        type = "array",
-        value = new_arr
-    })
+    return vm:set_register(A, new_arr_val)
 end
 
 -- R[a] = R[b][c]
@@ -1646,15 +1631,11 @@ function execute.op_string(vm: VM, ext: number)
     local str = vm.current_irep.pool[B + 1]
     assert(type(str) == "string")
 
-    local new_str: String = {
-        class = string_class,
-        ivar = keyvalue.new(),
-        str = str
-    }
-    vm:set_register(A, {
-        type = "string",
-        value = new_str
-    })
+    local new_str_val = class.instance_new(string_class)
+    local new_str = new_str_val.value :: String
+    new_str.str = str
+
+    vm:set_register(A, new_str_val)
 end
 
 -- str_cat(R[a], R[a+1])
@@ -1677,11 +1658,9 @@ end
 -- Operands: BB
 function execute.op_hash(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
-    local new_hash: Hash = {
-        class = hash_class,
-        ivar = keyvalue.new(),
-        hash = {}
-    }
+
+    local new_hash_val = class.instance_new(hash_class)
+    local new_hash = new_hash_val.value :: Hash
 
     for i = A, A + 2*B - 1, 2 do
         local key = vm:get_register(i)
@@ -1691,10 +1670,7 @@ function execute.op_hash(vm: VM, ext: number)
         new_hash.hash[key] = value
     end
 
-    vm:set_register(A, {
-        type = "hash",
-        value = new_hash
-    })
+    vm:set_register(A, new_hash_val)
 end
 
 -- hash_push(R[a],R[a+1]..R[a+b*2])
@@ -1723,20 +1699,16 @@ function execute.op_hashcat(vm: VM, ext: number)
     local hash2 = vm:get_register(A + 1)
     assert(hash1.type == "hash")
 
-    local new_hash: Hash = {
-        class = hash_class,
-        ivar = keyvalue.new(),
-        hash = table.clone(hash1.value.hash)
-    }
+    local new_hash_val = class.instance_new(hash_class)
+    local new_hash = new_hash_val.value :: Hash
+
+    new_hash.hash = table.clone(hash1.value.hash)
 
     for k, v in hash2.value.hash do
         new_hash.hash[k] = v
     end
 
-    vm:set_register(A, {
-        type = "hash",
-        value = new_hash
-    })
+    vm:set_register(A, new_hash_val)
 end
 
 -- R[a] = lambda(Irep[b],L_LAMBDA)
@@ -1815,6 +1787,11 @@ function execute.op_class(vm: VM, ext: number)
     local val = vm:get_register(A + 1)
     local super = if val.type == "class" then val.value else object_class
 
+    if super.is_singleton then
+        err.raise(vm, error_class.TypeError, `can't make subclass of singleton class`)
+        return
+    end
+
     local new_class: Class
     if outer.type == "class" then
         new_class = class.define_class_under(vm, outer.value, class_name, super)
@@ -1865,7 +1842,7 @@ function execute.op_def(vm: VM, ext: number)
     
     local sym_id = vm.current_irep.syms[B + 1]
     
-    val1.value.methods[sym_id] = {
+    val1.value.definitions[sym_id] = {
         sym_id = sym_id,
         type = "irep",
         value = val2.value.irep
@@ -1884,12 +1861,12 @@ function execute.op_alias(vm: VM, ext: number)
     local alias_id = vm.current_irep.syms[B + 1]
 
     local cls = vm.target_class
-    if class.find_method(cls, method_id) == nil then
+    if class.get_method(cls, method_id) == nil then
         err.raise(vm, error_class.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
         return
     end
 
-    cls.methods[alias_id] = cls.methods[method_id]
+    cls.definitions[alias_id] = cls.definitions[method_id]
 end
 
 -- undef_method(target_class,Syms(a))
@@ -1900,7 +1877,7 @@ function execute.op_undef(vm: VM, ext: number)
     local method_id = vm.current_irep.syms[A + 1]
 
     local cls = vm.target_class
-    if class.find_method(cls, method_id) == nil then
+    if class.get_method(cls, method_id) == nil then
         err.raise(vm, error_class.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
         return
     end
@@ -1912,7 +1889,13 @@ end
 -- Operands: B
 function execute.op_sclass(vm: VM, ext: number)
     local A = opcodes.fetch_B(vm.inst, ext)
-    error("not implemented")
+    local obj = vm:get_register(A)
+
+    local sclass = class.get_singleton_class(obj.value)
+    vm:set_register(A, {
+        type = "class",
+        value = sclass
+    })
 end
 
 -- R[a] = target_class
@@ -1941,78 +1924,90 @@ function execute.op_err(vm: VM, ext: number)
     err.raise(vm, error_class.LocalJumpError, tostring(message))
 end
 
-function VM.run(vm: VM)
-    local ext = 0
+function VM.read_instruction(vm: VM): ("continue" | "stop" | "error")
+    local inst = vm.inst:read_byte()
+    local opcode = opcodes.opcodes[inst]
+    assert(opcode ~= nil, `unknown opcode {inst}`)
+    
+    if opcode == "OP_EXT1" then
+        vm.ext = 1
+        return "continue"
+    elseif opcode == "OP_EXT2" then
+        vm.ext = 2
+        return "continue"
+    elseif opcode == "OP_EXT3" then
+        vm.ext = 3
+        return "continue"
+    elseif opcode == "OP_STOP" then
+        return "stop"
+    end
 
+    local func: ((vm: VM, ext: number) -> ())? = execute[ opcode:lower() ]
+    assert(func ~= nil, `unknown or not implemented opcode: {inst} {opcode}`)
+    
+    if vm.debug_mode then
+        print(`executing opcode: {tostring(opcode)}`) -- debug
+    end
+    func(vm, vm.ext)
+
+    if vm.debug_mode then
+        print(`registers (after executing): (-> {vm.current_self_idx})`)
+        for i, v in vm.registers do
+            print(`  {i} = {if v.type == "object" then `#<{v.value.class.name}:{tostring(v.value):sub(#("table: ") + 1)}>` elseif v.type == "class" then v.value.name elseif v.type == "integer" then `int({v.value})` else v.type}`)
+        end
+        print("")
+    end
+
+    if vm.ext ~= 0 then
+        vm.ext = 0
+    end
+
+    if vm.should_stop then
+        return "stop"
+    end
+
+    if vm.exception.type == "nil" then
+        return "continue"
+    end
+    
+    -- Handle exceptions and catch handlers
     while true do
-        local inst = vm.inst:read_byte()
-        local opcode = opcodes.opcodes[inst]
-        assert(opcode ~= nil, `unknown opcode {inst}`)
-        
-        if opcode == "OP_EXT1" then
-            ext = 1
-            continue
-        elseif opcode == "OP_EXT2" then
-            ext = 2
-            continue
-        elseif opcode == "OP_EXT3" then
-            ext = 3
-            continue
-        elseif opcode == "OP_STOP" then
+        -- We should first search for a rescue, if not then an ensure
+        local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
+        if handler then
+            vm.inst.cursor = vm.current_irep.inst_idx + handler.target
             break
         end
 
-        local func: ((vm: VM, ext: number) -> ())? = execute[ opcode:lower() ]
-        assert(func ~= nil, `unknown or not implemented opcode: {inst} {opcode}`)
-        
-        if vm.debug_mode then
-            print(`executing opcode: {tostring(opcode)}`) -- debug
-        end
-        func(vm, ext)
-
-        if vm.debug_mode then
-            print(`registers (after executing): (-> {vm.current_self_idx})`)
-            for i, v in vm.registers do
-                print(`  {i} = {if v.type == "object" then v.value.class.name else v.type}`)
-            end
-            print("")
+        -- We reached the end and couldn't find a catch handler
+        if not vm.callinfo_tail then
+            return "error"
         end
 
-        if ext ~= 0 then
-            ext = 0
-        end
+        vm:pop_callinfo()
+    end
 
-        if vm.should_stop then
-            break
-        end
+    assert(false, `this shouldn't be reachable`)
+end
 
-        if vm.exception.type == "nil" then
+function VM.run(vm: VM)
+    while true do
+        local status = vm:read_instruction()
+        if status == "continue" then
             continue
-        end
-        
-        -- Handle exceptions and catch handlers
-        while true do
-            -- We should first search for a rescue, if not then an ensure
-            local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
-            if handler then
-                vm.inst.cursor = vm.current_irep.inst_idx + handler.target
-                break
+
+        elseif status == "stop" then
+            break
+
+        elseif status == "error" then
+            local ex = vm.exception.value :: Exception
+            local msg = `{ex.message} ({ex.class.name})`
+
+            for i = #ex.call_nest, 1, -1 do
+                msg ..= `\n    in '{symbol.symid_to_str(ex.call_nest[i])}'`
             end
 
-            -- We reached the end and couldn't find a catch handler
-            if not vm.callinfo_tail then
-                local ex = vm.exception.value :: Exception
-                local msg = `{ex.message} ({ex.class.name})`
-
-                for i = #ex.call_nest, 1, -1 do
-                    msg ..= `\n    in '{symbol.symid_to_str(ex.call_nest[i])}'`
-                end
-
-                error(msg)
-                return
-            end
-
-            vm:pop_callinfo()
+            error(msg)
         end
     end
 end

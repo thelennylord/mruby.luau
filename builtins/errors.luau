@@ -1,30 +1,27 @@
 --!strict
 local class = require("class")
 local types = require("types")
-local error = require("error")
 local value = require("value")
 local symbol = require("symbol")
-local objectClass = require("builtins/object")
+local object_class = require("builtins/object")
 
 type VM = types.VM
 type Value = types.Value
 type State = types.State
 
-local Exception = class.define_class(nil, "Exception", objectClass)
+local Exception = class.define_class(nil, "Exception", object_class)
 
-class.define_method(Exception, "new", function(state: State, argc: number)
+class.define_method(Exception, "initialize", function(state: State, argc: number)
     local val1 = state.get_register(0)
-    assert(val1.type == "class")
+    assert(val1.type == "exception")
+    
+    if argc == 1 then
+        local msg = state.get_register(1)
+        -- TODO call to_str/to_s
+        assert(msg.type == "string")
 
-    local ret: Value
-    if argc == 1 and state.get_register(1).type == "string" then
-        local str = state.get_register(1).value
-        ret = error.exception_new(state.vm, val1.value, str)
-    else
-        ret = error.exception_new(state.vm, val1.value, "")
+        val1.value.message = msg.value.str
     end
-
-    state.set_register(0, ret)
 end)
 
 class.define_method(Exception, "message", function(state: State, argc: number)
@@ -33,9 +30,10 @@ class.define_method(Exception, "message", function(state: State, argc: number)
 
     local ret: Value
     if val1.value.message ~= nil then
+        -- TODO Make use of string class
         ret = value.autocast(val1.value.message)
     else
-        ret = value.autocast(symbol.symid_to_str(val1.value.class.sym_id))
+        ret = value.autocast(symbol.symid_to_str(class.get_class(val1.value).sym_id))
     end
 
     state.set_register(0, ret)

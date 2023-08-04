@@ -11,9 +11,9 @@ local string_class = require("builtins/string")
 type State = types.State
 type String = types.String
 
-local Integer = class.define_class(nil, "Integer", object_class)
+local Float = class.define_class(nil, "Float", object_class)
 
-class.define_method(Integer, "zero?", function(state: State, argc: number)
+class.define_method(Float, "zero?", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
@@ -23,7 +23,7 @@ class.define_method(Integer, "zero?", function(state: State, argc: number)
     state.set_register(0, value.autocast(val.value.number == 0))
 end)
 
-class.define_method(Integer, "nonzero?", function(state: State, argc: number)
+class.define_method(Float, "nonzero?", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
@@ -33,7 +33,7 @@ class.define_method(Integer, "nonzero?", function(state: State, argc: number)
     state.set_register(0, value.autocast(val.value.number ~= 0))
 end)
 
-class.define_method(Integer, "positive?", function(state: State, argc: number)
+class.define_method(Float, "positive?", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
@@ -43,7 +43,7 @@ class.define_method(Integer, "positive?", function(state: State, argc: number)
     state.set_register(0, value.autocast(val.value.number > 0))
 end)
 
-class.define_method(Integer, "negative?", function(state: State, argc: number)
+class.define_method(Float, "negative?", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
@@ -53,68 +53,59 @@ class.define_method(Integer, "negative?", function(state: State, argc: number)
     state.set_register(0, value.autocast(val.value.number < 0))
 end)
 
-class.define_method(Integer, "abs", function(state: State, argc: number)
+class.define_method(Float, "abs", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
     end
 
     local val = state.get_register(0)
-    state.set_register(0, value.autocast(math.abs(val.value.number), "integer"))
+    state.set_register(0, value.autocast(math.abs(val.value.number), "float"))
 end)
+class.alias_method(Float, "magnitude", "abs")
 
-class.define_method(Integer, "abs2", function(state: State, argc: number)
+class.define_method(Float, "abs2", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
     end
 
     local val = state.get_register(0)
-    state.set_register(0, value.autocast(math.abs(val.value.number) ^ 2, "integer"))
+    state.set_register(0, value.autocast(math.abs(val.value.number) ^ 2, "float"))
 end)
 
-class.define_method(Integer, "integer?", function(state: State, argc: number)
+class.define_method(Float, "integer?", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
     end
 
-    state.set_register(0, value.autocast(true))
+    state.set_register(0, value.autocast(false))
 end)
 
-class.define_method(Integer, "even?", function(state: State, argc: number)
-    if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
-        return
-    end
-
-    local self = state.get_register(0)
-    state.set_register(0, value.autocast(self.value.number % 2 == 0))
-end)
-
-class.define_method(Integer, "odd?", function(state: State, argc: number)
-    if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
-        return
-    end
-
-    local self = state.get_register(0)
-    state.set_register(0, value.autocast(self.value.number % 2 == 1))
-end)
-
-class.define_method(Integer, "to_i", function(state: State, argc: number)
+class.define_method(Float, "to_i", function(state: State, argc: number)
     if argc > 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
     end
     
-    -- Do nothing since it returns itself
+    local self = state.get_register(0)
+    state.set_register(0, value.autocast(math.floor(self.value.number), "integer`"))
 end)
-class.alias_method(Integer, "to_int", "to_i")
+class.alias_method(Float, "to_int", "to_i")
 
-class.define_method(Integer, "inspect", function(state: State, argc: number)
-    if argc > 1 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0..1)`)
+class.define_method(Float, "to_f", function(state: State, argc: number)
+    if argc > 0 then
+        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
+        return
+    end
+    
+    -- Do nothing as it returns self
+end)
+
+class.define_method(Float, "inspect", function(state: State, argc: number)
+    if argc > 0 then
+        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
     end
     
@@ -122,53 +113,11 @@ class.define_method(Integer, "inspect", function(state: State, argc: number)
     local new_str_val = class.instance_new(string_class);
     (new_str_val.value :: String).str = tostring(val.value.number)
 
-    if argc == 1 then
-        local val1 = state.get_register(1)
-        if val1.type ~= "integer" and val1.type ~= "float" then
-            err.raise(state.vm, error_class.TypeError, `no implicit conversion of {val1.value.class.name} into Integer`)
-            return    
-        end
-        
-        local base = math.round(val1.value.number)
-        if base < 2 and base > 36 then
-            err.raise(state.vm, error_class.ArgumentError, `invalid radix {base}`)
-            return    
-        end
-
-        if base ~= 10 then
-            local num = val.value.number
-            local digits = "0123456789abcdefghijklmnopqrstuvwxyz"
-            local num_str = {}
-            if num < 0 then
-                table.insert(num_str, "-")
-            end
-    
-            num = math.abs(num)
-            repeat
-                local digit = (num % base) + 1
-                num = math.floor(num / base)
-                table.insert(num_str, 1, digits:sub(digit, digit))
-            until num == 0
-            (new_str_val.value :: String).str = table.concat(num_str, "")
-        end 
-    end
-
     state.set_register(0, new_str_val)
 end)
-class.alias_method(Integer, "to_s", "inspect")
+class.alias_method(Float, "to_s", "inspect")
 
-class.define_method(Integer, "succ", function(state: State, argc: number)
-    if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
-        return
-    end
-    
-    local self = state.get_register(0)
-    state.set_register(0, value.autocast(self.value.number + 1, "integer"))
-end)
-class.alias_method(Integer, "next", "succ")
-
-class.define_method(Integer, "div", function(state: State, argc: number)
+class.define_method(Float, "div", function(state: State, argc: number)
     if argc > 1 or argc == 0 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
@@ -177,14 +126,31 @@ class.define_method(Integer, "div", function(state: State, argc: number)
     local self = state.get_register(0)
     local val = state.get_register(1)
     if val.type ~= "integer" and val.type ~= "float" then
-        err.raise(state.vm, error_class.TypeError, `{class.get_class(val.value).name} can't be coerced into Integer`)
+        err.raise(state.vm, error_class.TypeError, `{val.value.name} can't be coerced into Float`)
         return
     end
 
     state.set_register(0, value.autocast(math.floor(self.value.number / val.value.number), "integer"))
 end)
 
-class.define_method(Integer, "ceil", function(state: State, argc: number)
+class.define_method(Float, "fdiv", function(state: State, argc: number)
+    if argc > 1 or argc == 0 then
+        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        return
+    end
+    
+    local self = state.get_register(0)
+    local val = state.get_register(1)
+    if val.type ~= "integer" and val.type ~= "float" then
+        err.raise(state.vm, error_class.TypeError, `{val.value.name} can't be coerced into Float`)
+        return
+    end
+
+    state.set_register(0, value.autocast(self.value.number / val.value.number, "float"))
+end)
+class.alias_method(Float, "quo", "fdiv")
+
+class.define_method(Float, "ceil", function(state: State, argc: number)
     if argc > 1 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
@@ -196,7 +162,7 @@ class.define_method(Integer, "ceil", function(state: State, argc: number)
     if argc > 0 then
         local val = state.get_register(1)
         if val.type ~= "integer" and val.type ~= "float" then
-            err.raise(state.vm, error_class.TypeError, `{class.get_class(val.value).name} can't be coerced into Integer`)
+            err.raise(state.vm, error_class.TypeError, `{val.value.name} can't be coerced into Float`)
             return
         end
         
@@ -210,10 +176,10 @@ class.define_method(Integer, "ceil", function(state: State, argc: number)
         ret = self.value.number - (self.value.number % -10^ndigits)
     end
 
-    state.set_register(0, value.autocast(ret, "integer"))
+    state.set_register(0, value.autocast(ret, "float"))
 end)
 
-class.define_method(Integer, "floor", function(state: State, argc: number)
+class.define_method(Float, "floor", function(state: State, argc: number)
     if argc > 1 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
@@ -225,7 +191,7 @@ class.define_method(Integer, "floor", function(state: State, argc: number)
     if argc > 0 then
         local val = state.get_register(1)
         if val.type ~= "integer" and val.type ~= "float" then
-            err.raise(state.vm, error_class.TypeError, `{class.get_class(val.value).name} can't be coerced into Integer`)
+            err.raise(state.vm, error_class.TypeError, `{val.value.name} can't be coerced into Float`)
             return
         end
         
@@ -239,7 +205,7 @@ class.define_method(Integer, "floor", function(state: State, argc: number)
         ret = self.value.number - (self.value.number % -10^ndigits)
     end
 
-    state.set_register(0, value.autocast(ret, "integer"))
+    state.set_register(0, value.autocast(ret, "float"))
 end)
 
-return Integer
+return Float

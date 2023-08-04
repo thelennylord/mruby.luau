@@ -3,13 +3,13 @@ local types = require("types")
 local opcodes = require("opcodes")
 local symbol = require("symbol")
 
-type BinaryStream = types.BinaryStream
+type ByteStream = types.ByteStream
 type Proc = types.Proc
 type IREP = types.IREP
 type Instruction = types.Instruction
 type CatchHandler = types.CatchHandler
 
-local function read_binary_header(reader: BinaryStream)
+local function read_binary_header(reader: ByteStream)
     -- TODO Don't use asserts
     assert(reader:read_string(4) == "RITE")
     assert(reader:read_string(2) == "03")
@@ -29,7 +29,7 @@ local function read_binary_header(reader: BinaryStream)
 end
 
 -- TODO Convert addresses into table
-local function read_instructions(reader: BinaryStream, length: number): { Instruction }
+local function read_instructions(reader: ByteStream, length: number): { Instruction }
     local instructions: { Instruction } = {}
     local ext_type = 0
     local jmp_pc_adjustments: { Instruction } = {}
@@ -105,7 +105,7 @@ local function read_instructions(reader: BinaryStream, length: number): { Instru
     return instructions
 end
 
-local function read_catch_handlers(reader: BinaryStream, length: number): { CatchHandler }
+local function read_catch_handlers(reader: ByteStream, length: number): { CatchHandler }
     local handlers: { CatchHandler } = {}
 
     while #handlers < length do
@@ -124,7 +124,7 @@ local function read_catch_handlers(reader: BinaryStream, length: number): { Catc
     return handlers
 end
 
-local function read_pool(reader: BinaryStream, length: number): { boolean | string | number }
+local function read_pool(reader: ByteStream, length: number): { boolean | string | number }
     local pool: { boolean | string | number } = {}
 
     while #pool < length do
@@ -164,7 +164,7 @@ local function read_pool(reader: BinaryStream, length: number): { boolean | stri
     return pool
 end
 
-local function read_syms(reader: BinaryStream, length: number): { number }
+local function read_syms(reader: ByteStream, length: number): { number }
     local syms: { number } = {}
 
     while #syms < length do
@@ -180,7 +180,7 @@ local function read_syms(reader: BinaryStream, length: number): { number }
     return syms
 end
 
-local function read_irep(reader: BinaryStream): IREP
+local function read_irep(reader: ByteStream): IREP
     -- Skip record size
     reader:skip(4)
 
@@ -213,7 +213,7 @@ local function read_irep(reader: BinaryStream): IREP
     return irep
 end
 
-local function load_bytecode(reader: BinaryStream): IREP
+local function load_bytecode(reader: ByteStream): IREP
     read_binary_header(reader)
     
     return read_irep(reader)

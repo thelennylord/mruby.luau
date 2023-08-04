@@ -1,7 +1,6 @@
 --!strict
 -- Object class
 local types = require("types")
-local symbol = require("symbol")
 local class = require("class")
 local value = require("value")
 local keyvalue = require("keyvalue")
@@ -12,42 +11,13 @@ type Value = types.Value
 type Method = types.Method
 type Class = types.Class
 type State = types.State
+type String = types.String
 
-local sym = symbol.str_to_symid
-
-local function initialize_call(state: State, argc: number)
-    local val = state.get_register(0)
-    local cls = class.find_class_by_object(val)
-
-    local method = class.find_method(cls, sym("initialize"))
-    if not method then
-        -- TODO 
-        return
-    end
-
-    if method.type == "luafunc" then
-        method.value(state, argc)
-        return
-    end
-
-    local callinfo = state.vm:push_callinfo(sym("initialize"), 1, argc)
-    callinfo.own_class = cls
-
-    state.vm.current_irep = method.value
-    state.vm.inst.cursor = state.vm.current_irep.inst_idx
-    --vm.current_self_idx = vm.current_self_idx
-end
-
--- Define class
+-- An empty class of Object was already pre-defined in class.luau
 local Object = class.define_class(nil, "Object", nil :: any)
 
 -- Methods
-class.define_method(Object, "new", function(state: State, argc: number)
-    local cls = state.get_register(0)
-
-    state.set_register(0, class.instance_new(cls.value))
-    initialize_call(state, argc)
-end)
+class.define_method(Object, "initialize", function(state: State, argc: number) end)
 
 class.define_method(Object, "!", function(state: State, argc: number)
     local cls = state.get_register(0)
@@ -58,7 +28,7 @@ end)
 
 class.define_method(Object, "!=", function(state: State, argc: number)
     local val1 = state.get_register(0)
-    local val2 = state.get_register(0)
+    local val2 = state.get_register(1)
 
     local ret = value.autocast(value.compare(val1, val2) ~= 0)
     state.set_register(0, ret)
@@ -66,7 +36,7 @@ end)
 
 class.define_method(Object, "<=>", function(state: State, argc: number)
     local val1 = state.get_register(0)
-    local val2 = state.get_register(0)
+    local val2 = state.get_register(1)
 
     local ret = value.autocast(value.compare(val1, val2), "integer")
     state.set_register(0, ret)
@@ -80,13 +50,29 @@ class.define_method(Object, "==", function(state: State, argc: number)
     state.set_register(0, ret)
 end)
 
+class.define_method(Object, "to_s", function(state: State, argc: number)
+    local self = state.get_register(0)
+
+    local ret = class.instance_new(class.get_class_by_name("String") :: Class);
+    (ret.value :: String).str = `#<{self.value.class.name}:{tostring(self):sub(8)}>`
+
+    state.set_register(0, ret)
+end)
+
+class.define_method(Object, "__id__", function(state: State, argc: number)
+    local self = state.get_register(0)
+    local id = tonumber(tostring(self):sub(8))
+
+    state.set_register(0, value.autocast(id, "integer"))
+end)
+
 class.define_method(Object, "===", function(state: State, argc: number)
     local val1 = state.get_register(0)
     local val2 = state.get_register(1)
 
     local ret: Value
     if val1.type == "class" then
-        ret = value.autocast(class.obj_kind_of(val2, val1.value))
+        ret = value.autocast(class.obj_kind_of(val2.value, val1.value))
     else
         ret = value.autocast(value.compare(val1, val2) == 0)
     end
@@ -98,7 +84,7 @@ class.define_method(Object, "class", function(state: State, argc: number)
 
     local ret: Value = {
         type = "class",
-        value = class.find_class_by_object(val1)
+        value = class.get_class(val1.value)
     } 
 
     state.set_register(0, ret)
@@ -135,7 +121,7 @@ class.define_method(Object, "block_given?", function(state: State, argc: number)
     end
 
     -- TODO test
-    local ret = state.vm.registers[offset + callinfo.num_args + 1].type == "proc"
+    local ret = state.get_register(callinfo.num_args + 1).type == "proc"
     state.set_register(0, value.autocast(ret))
 end)
 
@@ -145,14 +131,14 @@ end)
 
 
 local kind_of = function(state: State, argc: number)
-    local instance = state.get_register(0)
+    local obj = state.get_register(0)
     local cls = state.get_register(1)
     if cls.type ~= "class" then
-        -- TODO Raise error
+        -- TODO Raise
         return
     end
 
-    state.set_register(0, value.autocast(class.obj_kind_of(instance, cls.value)))
+    state.set_register(0, value.autocast(class.obj_kind_of(obj.value, cls.value)))
 end
 
 class.define_method(Object, "kind_of?", kind_of)
@@ -162,7 +148,7 @@ class.define_method(Object, "puts", function(state: State, argc: number)
     if argc > 0 then
         for i = 1, argc do
             local val = state.get_register(i)
-            assert(val.type == "string")
+            assert(val.type == "string", `internal: puts only supports string value`)
             print(val.value.str)
         end
     end

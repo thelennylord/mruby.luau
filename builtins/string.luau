@@ -2,7 +2,6 @@
 local class = require("class")
 local types = require("types")
 local value = require("value")
-local keyvalue = require("keyvalue")
 local err = require("error")
 local error_class = require("builtins/errors")
 local object_class = require("builtins/object")
@@ -14,19 +13,19 @@ type State = types.State
 
 local String = class.define_class(nil, "String", object_class)
 
+-- TODO Deprecate this function and make use of class.instance_new
 local function str_new(str: string): String
-    return {
-        str = str,
-        class = String,
-        data = {},
-        ivar = keyvalue.new()
-    }
+    local val = class.instance_new(String)
+    local obj = val.value :: String
+    obj.str = str
+
+    return obj
 end
 
-class.define_method(String, "new", function(state: State, argc: number)
+class.define_method(String, "initialize", function(state: State, argc: number)
     local val = state.get_register(0)
     if argc == 1 and val.type ~= "string" then
-        local value_type = if val.type == "object" then val.value.class.name else val.type:gsub("^%l", string.upper)
+        local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
         err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String`)
         return
     end
@@ -63,7 +62,7 @@ class.define_method(String, "+", function(state: State, argc: number)
 
     local val = state.get_register(1)
     if val.type ~= "string" then
-        local value_type = if val.type == "object" then val.value.class.name else val.type:gsub("^%l", string.upper)
+        local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
         err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String`)
         return
     end
@@ -87,14 +86,14 @@ class.define_method(String, "*", function(state: State, argc: number)
     local rep: number
     if val.type ~= "integer" then
         if val.type ~= "float" then
-            local value_type = if val.type == "object" then val.value.class.name else val.type:gsub("^%l", string.upper)
+            local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
             err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String`)
             return
         end
 
-        rep = math.floor(val.value)
+        rep = math.floor(val.value.number)
     else
-        rep = val.value
+        rep = val.value.number
     end
 
     state.set_register(0, {
@@ -177,14 +176,14 @@ class.define_method(String, "<<", function(state: State, argc: number)
 
     local val = state.get_register(1)
     if val.type == "integer" then
-        self.value.str ..= string.char(val.value)
+        self.value.str ..= string.char(val.value.number)
 
     elseif val.type == "string" then
         self.value.str ..= val.value.str
 
     else
         -- TODO Call to_s of other types
-        local value_type = if val.type == "object" then val.value.class.name else val.type:gsub("^%l", string.upper)
+        local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
         err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
         return
     end
@@ -206,10 +205,10 @@ class.define_method(String, "[]", function(state: State, argc: number)
     
     local val1 = state.get_register(1)
     if val1.type == "integer" or val1.type == "float" then
-        start_idx = math.floor(val1.value) + 1
+        start_idx = math.floor(val1.value.number) + 1
     else
         -- TODO Call to_s of other types
-        local value_type = if val1.type == "object" then val1.value.class.name else val1.type:gsub("^%l", string.upper)
+        local value_type = if val1.type == "object" then class.get_class(val1.value).name else val1.type:gsub("^%l", string.upper)
         err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
         return
     end
@@ -217,10 +216,10 @@ class.define_method(String, "[]", function(state: State, argc: number)
     if argc == 2 then
         local val2 = state.get_register(3)
         if val2.type == "integer" or val2.type == "float" then
-            end_idx = math.floor(val2.value) + 1
+            end_idx = math.floor(val2.value.number) + 1
         else
             -- TODO Call to_s of other types
-            local value_type = if val2.type == "object" then val2.value.class.name else val1.type:gsub("^%l", string.upper)
+            local value_type = if val2.type == "object" then class.get_class(val2.value).name else val1.type:gsub("^%l", string.upper)
             err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
             return
         end

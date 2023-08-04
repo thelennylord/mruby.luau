@@ -2,7 +2,7 @@
 
 local types = require("types")
 
-type BinaryStream = types.BinaryStream
+type ByteStream = types.ByteStream
 
 local opcodes = {
     [0] = "OP_NOP",
@@ -229,7 +229,7 @@ local operands = {
     [105] = {},
 }
 
-local function fetch_BB(reader: BinaryStream, ext: number): (number, number)
+local function fetch_BB(reader: ByteStream, ext: number): (number, number)
     local A = reader:read_byte()
     if bit32.band(1, ext) ~= 0 then
         A = bit32.bor(bit32.lshift(A, 8), reader:read_byte())
@@ -243,7 +243,7 @@ local function fetch_BB(reader: BinaryStream, ext: number): (number, number)
     return A, B
 end
 
-local function fetch_B(reader: BinaryStream, ext: number): number
+local function fetch_B(reader: ByteStream, ext: number): number
     local A = reader:read_byte()
     if bit32.band(1, ext) ~= 0 then
         A = bit32.bor(bit32.lshift(A, 8), reader:read_byte())
@@ -252,7 +252,7 @@ local function fetch_B(reader: BinaryStream, ext: number): number
     return A
 end
 
-local function fetch_BBB(reader: BinaryStream, ext: number): (number, number, number)
+local function fetch_BBB(reader: ByteStream, ext: number): (number, number, number)
     local A = reader:read_byte()
     if bit32.band(1, ext) ~= 0 then
         A = bit32.bor(bit32.lshift(A, 8), reader:read_byte())
@@ -268,7 +268,7 @@ local function fetch_BBB(reader: BinaryStream, ext: number): (number, number, nu
     return A, B, C
 end
 
-local function fetch_BS(reader: BinaryStream, ext: number): (number, number)
+local function fetch_BS(reader: ByteStream, ext: number): (number, number)
     local A = reader:read_byte()
     if bit32.band(1, ext) ~= 0 then
         A = bit32.bor(bit32.lshift(A, 8), reader:read_byte())
@@ -279,7 +279,7 @@ local function fetch_BS(reader: BinaryStream, ext: number): (number, number)
     return A, B
 end
 
-local function fetch_BSS(reader: BinaryStream, ext: number): (number, number, number)
+local function fetch_BSS(reader: ByteStream, ext: number): (number, number, number)
     local A = reader:read_byte()
     if bit32.band(1, ext) ~= 0 then
         A = bit32.bor(bit32.lshift(A, 8), reader:read_byte())
@@ -291,11 +291,11 @@ local function fetch_BSS(reader: BinaryStream, ext: number): (number, number, nu
     return A, B, C
 end
 
-local function fetch_S(reader: BinaryStream, ext: number): number
+local function fetch_S(reader: ByteStream, ext: number): number
     return reader:read_byte(2)
 end
 
-local function fetch_W(reader: BinaryStream, ext: number): number
+local function fetch_W(reader: ByteStream, ext: number): number
     return reader:read_byte(3)
 end
 

@@ -1,7 +1,7 @@
 --!strict
 local types = require("types")
 local symbol = require("symbol")
-local keyvalue = require("keyvalue")
+local class = require("class")
 
 type Exception = types.Exception
 type VM = types.VM
@@ -9,24 +9,20 @@ type Class = types.Class
 type Value = types.Value
 
 local function sub_exception_new(vm: VM, exc_class: Class): Exception
-    local class: Exception = {
-        class = exc_class,
-        ivar = keyvalue.new(),
-        method_id = 0,
-        call_nest = {},
-        message = "",
-        data = {}
-    }
+    assert(exc_class ~= nil)
+
+    local val = class.instance_new(exc_class)
+    local obj = val.value :: Exception
     
     -- TODO: verify if the modification works
     local callinfo = vm.callinfo_tail
     while callinfo ~= nil do
         local method_id = callinfo.method_id or 0
-        table.insert(class.call_nest, method_id)
+        table.insert(obj.call_nest, method_id)
         callinfo = callinfo.prev
     end
 
-    return class
+    return obj
 end
 
 local function exception_new(vm: VM, exc_class: Class, message: string): Value
