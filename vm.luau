@@ -21,6 +21,7 @@ local _float_class = require("builtins/float")
 local _nilclass_class = require("builtins/nilclass")
 local _trueclass_class = require("builtins/trueclass")
 local _falseclass_class = require("builtins/falseclass")
+local _module_class = require("builtins/module")
 
 type VM = types.VM
 type IREP = types.IREP
@@ -105,11 +106,10 @@ function VM.load(vm: VM, stream: ByteStream, irep: IREP)
     vm.top_irep = irep
     vm.current_irep = irep
     vm.target_class = object_class
-    vm.registers = { { type = "class", value = object_class } }
+    vm.registers = { class.instance_new(object_class) }
     vm.current_self_idx = 1
     vm.exception = value.autocast(nil)
     vm.inst = stream
-    vm.ext = 0
 
     stream.cursor = irep.inst_idx
 end
@@ -135,15 +135,15 @@ function VM.get_self(vm: VM): Value
 end
 
 function VM.get_catch_handler(vm: VM, handler_type: string?): CatchHandler?
-    if #vm.current_irep.catch_handlers then
+    if #vm.current_irep.catch_handlers == 0 then
         return nil
     end
-
+    
     local inst_rel = vm.inst.cursor - vm.current_irep.inst_idx
     for _, handler in vm.current_irep.catch_handlers do
         if handler.type == handler_type 
-            and handler.beginning <= inst_rel
-            and inst_rel < handler.ending 
+        and handler.beginning < inst_rel
+        and inst_rel <= handler.ending 
         then
             return handler
         end
@@ -317,7 +317,8 @@ function VM.push_callinfo(vm: VM, method_id: number?, reg_offset: number, num_ar
         num_args = num_args,
         prev = vm.callinfo_tail,
         super_called = false,
-        kdict = nil
+        kdict = nil,
+        returned = false
     }
 
     callinfo.prev = vm.callinfo_tail
@@ -336,6 +337,7 @@ function VM.pop_callinfo(vm: VM)
     
     local callinfo = vm.callinfo_tail
     callinfo.kdict = nil
+    callinfo.returned = true
 
     -- Restore VM to its state based on CallInfo
     vm.inst.cursor = callinfo.inst_idx
@@ -620,8 +622,19 @@ function execute.op_getconst(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
     local sym_id = vm.current_irep.syms[B + 1]
+    
+    local cls: Class = if vm.callinfo_tail ~= nil and vm.callinfo_tail.own_class ~= nil then
+        vm.callinfo_tail.own_class    
+    else
+        vm.target_class
+    
+    local val = global.consts.get_class_const(cls, sym_id) or global.consts.get(sym_id)
+    if val == nil then
+        err.raise(vm, error_class.NameError, `uninitialized constant {symbol.symid_to_str(sym_id)}`)
+        return
+    end
 
-    vm:set_register(A, global.consts.get(sym_id))
+    vm:set_register(A, val)
 end
 
 -- constset(Syms[b], R[a])
@@ -629,9 +642,15 @@ end
 function execute.op_setconst(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
+    local value = vm:get_register(A)
     local sym_id = vm.current_irep.syms[B + 1]
+    local self = vm:get_register(0)
 
-    global.consts.set(sym_id, vm:get_register(A))
+    if self.type == "class" then
+        global.consts.set_class_const(self.value, sym_id, value)
+    else
+        global.consts.set(sym_id, vm:get_register(A))
+    end
 end
 
 -- R[a] = R[a]::Syms[b]
@@ -639,7 +658,22 @@ end
 function execute.op_getmcnst(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    error("not implemented")
+    local val = vm:get_register(A)
+    if val.type ~= "class" then
+        -- TODO use val.to_s
+        err.raise(vm, error_class.TypeError, `object is not a class/module`)
+        return
+    end
+
+    local sym_id = vm.current_irep.syms[B + 1]
+
+    local obj = global.consts.get_class_const(val.value, sym_id)
+    if obj == nil then
+        err.raise(vm, error_class.NameError, `uninitialized constant {symbol.symid_to_str(val.value.sym_id)}::{symbol.symid_to_str(sym_id)}`)
+        return
+    end
+
+    vm:set_register(A, obj)
 end
 
 -- R[a+1]::Syms[b] = R[a]
@@ -647,7 +681,17 @@ end
 function execute.op_setmcnst(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    error("not implemented")
+    local val1 = vm:get_register(A)
+    
+    local val2 = vm:get_register(A + 1)
+    if val2.type ~= "class" then
+        -- TODO use val1.to_s
+        err.raise(vm, error_class.TypeError, `object is not a class/module`)
+        return
+    end
+
+    local sym_id = vm.current_irep.syms[B + 1]
+    global.consts.set_class_const(val2.value, sym_id, val1)
 end
 
 -- R[a] = uvget(b,c)
@@ -980,7 +1024,7 @@ function execute.op_enter(vm: VM, ext: number)
     end
 
     -- Set new number of arguments (don't include proc)
-    vm.callinfo_tail.num_args = reg_idx - 1
+    vm.callinfo_tail.num_args = reg_idx - 2
 
     -- Jump depending on the amount of optional arguments
     local jump_offset = args_given - m1_count
@@ -1082,7 +1126,7 @@ function execute.op_return(vm: VM, ext: number)
         -- There is a saved return value from OP_RETURN_BLK (we can assume we are here due to an ensure)
         -- As you can explicitly return in an ensure, we need to make sure whether the ensure has a return or not
         -- If this return is the last instruction then we can assume that the ensure doesn't have an explicit return
-        if vm.inst.cursor == vm.current_irep.inst_idx + vm.current_irep.num_instructions - 1 then
+        if vm.inst.cursor == vm.current_irep.inst_idx + vm.current_irep.num_instructions - 2 then
             vm:pop_callinfo()
             return
         end
@@ -1093,7 +1137,6 @@ function execute.op_return(vm: VM, ext: number)
     end
     
     if callinfo == nil then
-        print("warning: argument of top-level return is ignored")
         vm.should_stop = true
         return
     end
@@ -1133,7 +1176,7 @@ function execute.op_return_blk(vm: VM, ext: number)
     end
 
     -- TODO check this lol
-    if vm.callinfo_tail == nil then
+    if vm.callinfo_tail == nil or vm.callinfo_tail.returned then
         err.raise(vm, error_class.LocalJumpError, "unexpected return")
         return
     end
@@ -1179,8 +1222,8 @@ function execute.op_break(vm: VM, ext: number)
 
     -- Break returns the block and the caller calling the block (verify)
     local target_callinfo = proc.callinfo.prev
-    -- if target_callinfo == nil then
-    --     err.raise(vm, error_class.LocalJumpError, "unexpected break3")
+    -- if target_callinfo ~= nil and target_callinfo.returned then
+    --     err.raise(vm, error_class.LocalJumpError, "break from proc-closure")
     --     return
     -- end
 
@@ -1976,7 +2019,7 @@ function VM.read_instruction(vm: VM): ("continue" | "stop" | "error")
         local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
         if handler then
             vm.inst.cursor = vm.current_irep.inst_idx + handler.target
-            break
+            return "continue"
         end
 
         -- We reached the end and couldn't find a catch handler
@@ -1991,23 +2034,75 @@ function VM.read_instruction(vm: VM): ("continue" | "stop" | "error")
 end
 
 function VM.run(vm: VM)
+    local ext = 0
     while true do
-        local status = vm:read_instruction()
-        if status == "continue" then
+        local inst = vm.inst:read_byte()
+        local opcode = opcodes.opcodes[inst]
+        assert(opcode ~= nil, `unknown opcode {inst}`)
+        
+        if opcode == "OP_EXT1" then
+            ext = 1
             continue
-
-        elseif status == "stop" then
-            break
-
-        elseif status == "error" then
-            local ex = vm.exception.value :: Exception
-            local msg = `{ex.message} ({ex.class.name})`
-
-            for i = #ex.call_nest, 1, -1 do
-                msg ..= `\n    in '{symbol.symid_to_str(ex.call_nest[i])}'`
+        elseif opcode == "OP_EXT2" then
+            ext = 2
+            continue
+        elseif opcode == "OP_EXT3" then
+            ext = 3
+            continue
+        elseif opcode == "OP_STOP" then
+            return
+        end
+    
+        local func: ((vm: VM, ext: number) -> ())? = execute[ opcode:lower() ]
+        assert(func ~= nil, `unknown or not implemented opcode: {inst} {opcode}`)
+        
+        if vm.debug_mode then
+            print(`executing opcode: {tostring(opcode)}`) -- debug
+        end
+        func(vm, ext)
+    
+        if vm.debug_mode then
+            print(`registers (after executing): (-> {vm.current_self_idx})`)
+            for i, v in vm.registers do
+                print(`  {i} = {if v.type == "object" then `#<{v.value.class.name}:{tostring(v.value):sub(#("table: ") + 1)}>` elseif v.type == "class" then v.value.name elseif v.type == "integer" then `int({v.value})` else v.type}`)
             end
-
-            error(msg)
+            print("")
+        end
+    
+        if ext ~= 0 then
+            ext = 0
+        end
+    
+        if vm.should_stop then
+            return
+        end
+    
+        if vm.exception.type == "nil" then
+            continue
+        end
+        
+        -- Handle exceptions and catch handlers
+        while true do
+            -- We should first search for a rescue, if not then an ensure
+            local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
+            if handler then
+                vm.inst.cursor = vm.current_irep.inst_idx + handler.target
+                break
+            end
+    
+            -- We reached the end and couldn't find a catch handler
+            if not vm.callinfo_tail then
+                local ex = vm.exception.value :: Exception
+                local msg = `{ex.message} ({ex.class.name})`
+    
+                for i = #ex.call_nest, 1, -1 do
+                    msg ..= `\n    in '{symbol.symid_to_str(ex.call_nest[i])}'`
+                end
+    
+                error(msg)
+            end
+    
+            vm:pop_callinfo()
         end
     end
 end

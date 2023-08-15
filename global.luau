@@ -6,6 +6,7 @@ local symbol = require("symbol")
 type Class = types.Class
 type Value = types.Value
 type KeyValue = types.KeyValue
+type Symbol = types.Symbol
 
 local consts: KeyValue = keyvalue.new()
 local globals: KeyValue = keyvalue.new()
@@ -13,7 +14,7 @@ local globals: KeyValue = keyvalue.new()
 local function set_const(sym_id: number, value: Value)
     if consts[sym_id] ~= nil then
         -- TODO
-        warn(`constant already initialised: {symbol.symid_to_str(sym_id)}`)
+        print(`warn: constant already initialised: {symbol.symid_to_str(sym_id)}`)
     end
 
     consts[sym_id] = value
@@ -25,29 +26,26 @@ end
 
 
 local function set_class_const(class: Class, sym_id: number, value: Value)
-    local str = symbol.make_nested_sym(class.sym_id, sym_id)
-    local id = symbol.new_symbol(str).value
+    local new_symid = symbol.make_nested_sym(class.sym_id, sym_id)
 
     if value.type == "class" then
-        value.value.sym_id = id
+        value.value.sym_id = new_symid
     end
 
-    set_const(id, value)
+    set_const(new_symid, value)
 end
 
 local function get_class_const(class: Class, sym_id: number): Value?
-    local res = consts[class.sym_id]
-    if res ~= nil then
-        return res
+    local obj: Value? = nil
+
+    while obj == nil and class ~= nil do
+        local nested_symid = symbol.make_nested_sym(class.sym_id, sym_id)
+        obj = consts[nested_symid]
+
+        class = class.superclass
     end
 
-    local str = symbol.make_nested_sym(class.sym_id, sym_id)
-    local id = symbol.search_symid(str)
-    if id == nil then
-        return nil
-    end
-
-    return consts[id]
+    return obj
 end
 
 local function set_global(sym_id: number, value: Value)
@@ -62,8 +60,8 @@ return {
     consts = {
         set = set_const,
         get = get_const,
-        get_class = get_class_const,
-        set_class = set_class_const
+        get_class_const = get_class_const,
+        set_class_const = set_class_const
     },
 
     globals = {
