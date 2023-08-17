@@ -65,6 +65,7 @@ class.define_method(Object, "__id__", function(state: State, argc: number)
 
     state.set_register(0, value.autocast(id, "integer"))
 end)
+class.alias_method(Object, "object_id", "__id__")
 
 class.define_method(Object, "===", function(state: State, argc: number)
     local val1 = state.get_register(0)
@@ -121,7 +122,7 @@ class.define_method(Object, "block_given?", function(state: State, argc: number)
     end
 
     -- TODO test
-    local ret = state.get_register(callinfo.num_args + 1).type == "proc"
+    local ret = state.vm:get_register(callinfo.num_args + 1).type == "proc"
     state.set_register(0, value.autocast(ret))
 end)
 

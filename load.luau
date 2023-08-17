@@ -32,7 +32,7 @@ end
 local function read_instructions(reader: ByteStream, length: number): { Instruction }
     local instructions: { Instruction } = {}
     local ext_type = 0
-    local jmp_pc_adjustments: { Instruction } = {}
+    --local jmp_pc_adjustments: { Instruction } = {}
 
     local end_idx = reader.cursor + length
     while reader.cursor < end_idx do

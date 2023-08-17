@@ -140,5 +140,7 @@ class.define_method(Array, "count", function(state: State, argc: number)
 
     state.set_register(0, value.autocast(#self.value.array, "integer"))
 end)
+class.alias_method(Array, "length", "count")
+class.alias_method(Array, "size", "count")
 
 return Array

@@ -26,6 +26,7 @@ local BasicObject: Class = {
     name = "BasicObject",
     sym_id = symbol.str_to_symid("BasicObject"),
     is_singleton = false,
+    is_module = false,
     attached_object = nil,
     superclass = nil :: any,
     cvar = keyvalue.new(),
@@ -40,9 +41,25 @@ local Object: Class = {
     name = "Object",
     sym_id = symbol.str_to_symid("Object"),
     is_singleton = false,
+    is_module = false,
     attached_object = nil,
     superclass = BasicObject,
     cvar = BasicObject.cvar,
+    ivar = keyvalue.new(),
+    methods = {},
+    definitions = {},
+    subclasses = {},
+    class = nil :: any
+}
+
+local Module: Class = {
+    name = "Module",
+    sym_id = symbol.str_to_symid("Module"),
+    is_singleton = false,
+    is_module = false,
+    attached_object = nil,
+    superclass = Object,
+    cvar = Object.cvar,
     ivar = keyvalue.new(),
     methods = {},
     definitions = {},
@@ -54,9 +71,10 @@ local Class: Class = {
     name = "Class",
     sym_id = symbol.str_to_symid("Class"),
     is_singleton = false,
+    is_module = false,
     attached_object = nil,
-    superclass = Object,
-    cvar = Object.cvar,
+    superclass = Module,
+    cvar = Module.cvar,
     ivar = keyvalue.new(),
     methods = {},
     definitions = {},
@@ -67,6 +85,7 @@ local Class: Class = {
 -- Set their classes to Class 
 BasicObject.class = Class
 Object.class = Class
+Module.class = Class
 Class.class = Class
 
 -- and save them to the consts table
@@ -80,6 +99,11 @@ global.consts.set(Object.sym_id, {
     value = Object
 })
 
+global.consts.set(Module.sym_id, {
+    type = "class",
+    value = Module
+})
+
 global.consts.set(Class.sym_id, {
     type = "class",
     value = Class
@@ -90,7 +114,7 @@ local function define_class_under(vm: VM, outer: Class, name: string, super: Cla
     assert(name ~= nil)
     
     local sym_id = symbol.str_to_symid(name)
-    local val = global.consts.get_class(outer, sym_id)
+    local val = global.consts.get_class_const(outer, sym_id)
     
     if val ~= nil then
         assert(val.type == "class")
@@ -103,6 +127,7 @@ local function define_class_under(vm: VM, outer: Class, name: string, super: Cla
         name = name,
         sym_id = sym_id,
         is_singleton = false,
+        is_module = false,
         attached_object = nil,
         superclass = super,
         cvar = if super then super.cvar else keyvalue.new(),
@@ -115,7 +140,7 @@ local function define_class_under(vm: VM, outer: Class, name: string, super: Cla
 
     table.insert(super.subclasses, class)
 
-    global.consts.set_class(outer, sym_id, {
+    global.consts.set_class_const(outer, sym_id, {
         type = "class",
         value = class
     })
@@ -145,6 +170,7 @@ local function define_class(vm: VM?, name: string, super: Class): Class
         name = name,
         sym_id = sym_id,
         is_singleton = false,
+        is_module = false,
         attached_object = nil,
         superclass = super,
         cvar = super.cvar, -- TODO Make this compliant with CRuby
@@ -167,7 +193,7 @@ end
 
 local function get_class(obj: Object): Class
     local cls = obj.class
-    while cls.is_singleton == true do
+    while cls.is_singleton == true or cls.is_module == true do
         cls = cls.superclass
     end
 
@@ -194,6 +220,7 @@ local function get_singleton_class(obj: Object): Class
         name = cls.name,
         sym_id = cls.sym_id,
         is_singleton = true,
+        is_module = false,
         attached_object = obj,
         superclass = cls,
         cvar = cls.cvar,

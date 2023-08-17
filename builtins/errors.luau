@@ -8,6 +8,7 @@ local object_class = require("builtins/object")
 type VM = types.VM
 type Value = types.Value
 type State = types.State
+type Class = types.Class
 
 local Exception = class.define_class(nil, "Exception", object_class)
 
@@ -31,9 +32,10 @@ class.define_method(Exception, "message", function(state: State, argc: number)
     local ret: Value
     if val1.value.message ~= nil then
         -- TODO Make use of string class
-        ret = value.autocast(val1.value.message)
+        ret = class.instance_new(class.get_class_from_name("String") :: Class)
+        ret.value.str = val1.value.message
     else
-        ret = value.autocast(symbol.symid_to_str(class.get_class(val1.value).sym_id))
+        ret = value.autocast(symbol.symid_to_str(class.get_class(val1.value).sym_id), "symbol")
     end
 
     state.set_register(0, ret)
