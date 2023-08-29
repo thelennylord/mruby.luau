@@ -238,7 +238,6 @@ end
 
 local function define_method(cls: Class, name: string, luafunc: LuaMethod)
     assert(cls ~= nil)
-
     local sym_id = symbol.str_to_symid(name)
     local method: Method = {
         type = "luafunc",
@@ -333,11 +332,19 @@ local function get_method(obj: Object, sym_id: number): Method?
     return method
 end
 
-local function undefine_method(cls: Class, sym_id: number)
-    while cls ~= nil do
-        cls.methods[sym_id] = nil
+local function get_super_method(obj: Object, sym_id: number): Method?
+    local cls = obj.class.superclass
+    local method = nil
+    while method == nil and cls ~= nil do
+        method = cls.definitions[sym_id]
         cls = cls.superclass
     end
+
+    return method
+end
+
+local function undefine_method(cls: Class, sym_id: number)
+    cls.methods[sym_id] = false :: any
 end
 
 local function alias_method(cls: Class, alias_name: string, method_name: string)
@@ -371,6 +378,14 @@ local function get_class_by_name(name: string): Class?
     return obj.value
 end
 
+local function include_module(cls: Class, module: Class)
+    
+end
+
+local function define_module()
+    
+end
+
 return {
     define_class = define_class,
     define_class_under = define_class_under,
@@ -382,6 +397,7 @@ return {
     get_class_by_name = get_class_by_name,
     undefine_method = undefine_method,
     get_method = get_method,
+    get_super_method = get_super_method,
     get_class = get_class,
     get_singleton_class = get_singleton_class,
     get_class_from_name = get_class_from_name,

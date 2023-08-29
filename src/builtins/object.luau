@@ -12,20 +12,12 @@ type Method = types.Method
 type Class = types.Class
 type State = types.State
 type String = types.String
+type CallInfo = types.CallInfo
 
 -- An empty class of Object was already pre-defined in class.luau
 local Object = class.define_class(nil, "Object", nil :: any)
 
 -- Methods
-class.define_method(Object, "initialize", function(state: State, argc: number) end)
-
-class.define_method(Object, "!", function(state: State, argc: number)
-    local cls = state.get_register(0)
-
-    local ret = value.autocast(cls.type == "nil" or cls.type == "false")
-    state.set_register(0, ret)
-end)
-
 class.define_method(Object, "!=", function(state: State, argc: number)
     local val1 = state.get_register(0)
     local val2 = state.get_register(1)
@@ -50,7 +42,7 @@ class.define_method(Object, "==", function(state: State, argc: number)
     state.set_register(0, ret)
 end)
 
-class.define_method(Object, "to_s", function(state: State, argc: number)
+class.define_method(Object, "inspect", function(state: State, argc: number)
     local self = state.get_register(0)
 
     local ret = class.instance_new(class.get_class_by_name("String") :: Class);
@@ -59,12 +51,8 @@ class.define_method(Object, "to_s", function(state: State, argc: number)
     state.set_register(0, ret)
 end)
 
-class.define_method(Object, "__id__", function(state: State, argc: number)
-    local self = state.get_register(0)
-    local id = tonumber(tostring(self):sub(8))
+class.alias_method(Object, "to_s", "inspect")
 
-    state.set_register(0, value.autocast(id, "integer"))
-end)
 class.alias_method(Object, "object_id", "__id__")
 
 class.define_method(Object, "===", function(state: State, argc: number)
@@ -102,27 +90,23 @@ class.define_method(Object, "dup", function(state: State, argc: number)
 end)
 
 class.define_method(Object, "block_given?", function(state: State, argc: number)
-    local callinfo = state.vm.callinfo_tail
-    if callinfo == nil then
+    if #state.vm.callinfo_stack == 0 then
         state.vm:set_register(0, value.autocast(false))
         return
     end
+    
+    local callinfo = state.vm.current_callinfo
 
-    local offset = callinfo.current_self_idx + callinfo.reg_offset
-
-    local val1 = state.vm.registers[offset]
-    if val1.type == "proc" then
-        callinfo = val1.value.callinfo_self
+    local self = state.get_register(0)
+    if self.type == "proc" then
+        callinfo = self.value.caller_callinfo :: CallInfo
         if callinfo == nil then
             state.set_register(0, value.autocast(false))
             return
         end
-
-        offset = callinfo.current_self_idx + callinfo.reg_offset
     end
 
-    -- TODO test
-    local ret = state.vm:get_register(callinfo.num_args + 1).type == "proc"
+    local ret = state.vm:get_register(callinfo.arg_count + 1).type == "proc"
     state.set_register(0, value.autocast(ret))
 end)
 
@@ -130,8 +114,7 @@ class.define_method(Object, "nil?", function(state: State, argc: number)
     state.set_register(0, value.autocast(false))
 end)
 
-
-local kind_of = function(state: State, argc: number)
+class.define_method(Object, "kind_of?", function(state: State, argc: number)
     local obj = state.get_register(0)
     local cls = state.get_register(1)
     if cls.type ~= "class" then
@@ -140,21 +123,21 @@ local kind_of = function(state: State, argc: number)
     end
 
     state.set_register(0, value.autocast(class.obj_kind_of(obj.value, cls.value)))
-end
+end)
 
-class.define_method(Object, "kind_of?", kind_of)
-class.define_method(Object, "is_a?", kind_of)
+class.alias_method(Object, "is_a?", "kind_of?")
 
-class.define_method(Object, "puts", function(state: State, argc: number)
+class.define_method(Object, "echo", function(state: State, argc: number)
     if argc > 0 then
         for i = 1, argc do
             local val = state.get_register(i)
-            assert(val.type == "string", `internal: puts only supports string value`)
+            assert(val.type == "string", `internal: echo only supports string value`)
+
             print(val.value.str)
         end
     end
 
-    state.set_register(0, value.autocast(nil))
+    state.set_register(0, state.get_register(argc))
 end)
 
 return Object

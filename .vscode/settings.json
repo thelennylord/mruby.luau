@@ -1,0 +1,7 @@
+{
+    "luau-lsp.completion.autocompleteEnd": true,
+    // "luau-lsp.inlayHints.variableTypes": true,
+    // "luau-lsp.inlayHints.parameterTypes": true,
+    // "luau-lsp.inlayHints.functionReturnTypes": true,
+    "luau-lsp.types.roblox": false
+}

@@ -23,7 +23,7 @@ class.define_method(Class, "new", function(state: State, argc: number)
     local cls = self.value
     state.set_register(0, class.instance_new(cls))
 
-    local offset = state.current_self_idx - state.vm.current_self_idx
+    local offset = state.current_self_idx - state.vm.current_callinfo.self_reg_idx
     state.vm:send_by_name(symbol.str_to_symid("initialize"), offset + 0, argc)
 end)
 

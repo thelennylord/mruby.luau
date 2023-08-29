@@ -8,10 +8,11 @@ local class = require("class")
 local keyvalue = require("keyvalue")
 local err = require("error")
 
+local _basicobject_class = require("builtins/basicobject")
+local object_class = require("builtins/object")
 local array_class = require("builtins/array")
 local error_class = require("builtins/errors")
 local string_class = require("builtins/string")
-local object_class = require("builtins/object")
 local proc_class = require("builtins/proc")
 local hash_class = require("builtins/hash")
 local _class_class = require("builtins/class")
@@ -21,7 +22,7 @@ local _float_class = require("builtins/float")
 local _nilclass_class = require("builtins/nilclass")
 local _trueclass_class = require("builtins/trueclass")
 local _falseclass_class = require("builtins/falseclass")
-local _module_class = require("builtins/module")
+local module_class = require("builtins/module")
 
 type VM = types.VM
 type IREP = types.IREP
@@ -59,12 +60,12 @@ local function proc_new(vm: VM, irep: IREP, proc_type: "block" | "lambda" | "met
     local proc = val.value :: Proc
     proc.type = proc_type
     proc.irep = irep
-    proc.callinfo = vm.callinfo_tail :: CallInfo
 
-    if proc_type == "block" and vm:get_register(0).type == "proc" then
-        proc.callinfo_self = vm:get_register(0).value.callinfo_self
+    local self = vm:get_register(0)
+    if proc_type == "block" and self.type == "proc" then
+        proc.embracing_callinfo = self.value.embracing_callinfo
     else
-        proc.callinfo_self = vm.callinfo_tail :: CallInfo
+        proc.embracing_callinfo = vm.current_callinfo
     end
 
     return proc
@@ -82,9 +83,14 @@ function VM.new(debug_mode: boolean?): VM
     local self = {
         id = -1,
         debug_mode = debug_mode or false,
+        permanence = false,
         should_stop = false,
+        ensure_state = {
+            ensuring = false
+        },
         exception = value.autocast(nil),
-        current_self_idx = 1,
+        callinfo_stack = {},
+        registers = {}
     }
 
     return setmetatable(self, VM) :: any
@@ -101,16 +107,23 @@ function VM.load(vm: VM, stream: ByteStream, irep: IREP)
     assert(stream ~= nil)
     assert(irep ~= nil)
 
-    vm.should_stop = false
-    vm.permanence = false
+    vm.registers[1] = class.instance_new(object_class)
     vm.top_irep = irep
-    vm.current_irep = irep
-    vm.target_class = object_class
-    vm.registers = { class.instance_new(object_class) }
-    vm.current_self_idx = 1
-    vm.exception = value.autocast(nil)
     vm.inst = stream
-
+    
+    vm.current_callinfo = {
+        irep = irep,
+        inst_cursor_pos = irep.inst_idx,
+        self_reg_idx = 1,
+        target_class = object_class,
+        self_class = nil,
+        arg_count = 0,
+        super_called = false,
+        method_id = nil,
+        deleted_kargs = {},
+        dead = false
+    }
+    
     stream.cursor = irep.inst_idx
 end
 
@@ -121,9 +134,9 @@ end
 function VM.get_self(vm: VM): Value
     local self = vm:get_register(0)
     if self.type == "proc" then
-        local callinfo = self.value.callinfo_self
+        local callinfo = self.value.embracing_callinfo
         if callinfo ~= nil then
-            self = vm.registers[callinfo.current_self_idx + callinfo.reg_offset]
+            self = vm.registers[callinfo.self_reg_idx]
         else
             self = vm.registers[1]
         end
@@ -135,12 +148,12 @@ function VM.get_self(vm: VM): Value
 end
 
 function VM.get_catch_handler(vm: VM, handler_type: string?): CatchHandler?
-    if #vm.current_irep.catch_handlers == 0 then
+    if #vm.current_callinfo.irep.catch_handlers == 0 then
         return nil
     end
     
-    local inst_rel = vm.inst.cursor - vm.current_irep.inst_idx
-    for _, handler in vm.current_irep.catch_handlers do
+    local inst_rel = vm.inst.cursor - vm.current_callinfo.irep.inst_idx
+    for _, handler in vm.current_callinfo.irep.catch_handlers do
         if handler.type == handler_type 
         and handler.beginning < inst_rel
         and inst_rel <= handler.ending 
@@ -150,22 +163,6 @@ function VM.get_catch_handler(vm: VM, handler_type: string?): CatchHandler?
     end
 
     return nil
-end
-
-function VM.handle_ensure(vm: VM, till: Proc)
-    while true do
-        local handler = vm:get_catch_handler("ensure")
-        if handler then
-            vm.inst.cursor = vm.current_irep.inst_idx + handler.target
-            break
-        end
-
-        if vm.callinfo_tail == till then
-            break
-        end
-
-        vm:pop_callinfo()
-    end
 end
 
 local CALL_MAXARGS = 15
@@ -178,6 +175,7 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
     -- OP_SEND:
     --     R[a] = R[a].send(Syms[b], R[a+1].., R[a+n+1]:R[a+n+2]..) (c = n|k<<4)
 
+    local current_self_idx = vm.current_callinfo.self_reg_idx
     local num_args = bit32.band(C, 0x0f)
     local num_kwargs = bit32.band(bit32.rshift(C, 4), 0x0f)
     local block_given = bit32.rshift(C, 8) ~= 0
@@ -190,68 +188,61 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
         assert(arg_array.type == "array")
 
         table.move(arg_array.value.array, 1, #arg_array.value.array, 1, args)
+        vm.registers[A + 1] = nil
     elseif num_args > 0 then
-        table.move(vm.registers, vm.current_self_idx + A + 1, vm.current_self_idx + A + num_args, 1, args)
+        table.move(vm.registers, current_self_idx + A + 1, current_self_idx + A + num_args, 1, args)
+
+        -- Clear registers
+        for i = A + 1, A + num_args do
+            vm:set_register(i, nil :: any)
+        end
     end
 
     -- Convert keyword arguments into hash
-    local kw_start = if num_args == CALL_MAXARGS then vm.current_self_idx + A + 2 else vm.current_self_idx + A + num_args + 1
+    local kw_start = if num_args == CALL_MAXARGS then current_self_idx + A + 2 else current_self_idx + A + num_args + 1
     if num_kwargs > 0 then
         if num_kwargs ~= CALL_MAXARGS then
             local hash_val = class.instance_new(hash_class)
             local kw_hash = hash_val.value :: Hash
 
-            for i = 1, num_kwargs do
-                local key = vm.registers[kw_start + i - 1]
-                local val = vm.registers[kw_start + i]
-
-                vm.registers[kw_start + i - 1] = nil
+            for i = 0, num_kwargs * 2 - 1, 2 do
+                local key = vm.registers[kw_start + i]
+                local val = vm.registers[kw_start + i + 1]
+                
                 vm.registers[kw_start + i] = nil
+                vm.registers[kw_start + i + 1] = nil
 
-                if key.type == "string" then
-                    kw_hash.hash[key.value.str] = val
-                else
-                    kw_hash.hash[key.value] = val
-                end
+                kw_hash.hash[value.autocast(key.value.sym_id, "symbol")] = val
             end
 
             table.insert(args, hash_val)
         else
             table.insert(args, vm.registers[kw_start])
+            vm.registers[kw_start] = nil
         end
     end
 
-    local proc_start = if num_kwargs == CALL_MAXARGS then kw_start + 1 else kw_start + num_kwargs 
+    local proc_start = if num_kwargs == CALL_MAXARGS then kw_start + 1 else kw_start + num_kwargs * 2 
     if block_given then
         table.insert(args, vm.registers[proc_start])
+        vm.registers[proc_start] = nil
     end
 
-    -- Clear all arguments
-    for i = A + 1, A + #args do
-        vm:set_register(i, nil :: any)
-    end
-
-    table.move(args, 1, #args, vm.current_self_idx + A + 1, vm.registers)
+    table.move(args, 1, #args, current_self_idx + A + 1, vm.registers)
 
     local obj = vm:get_register(A).value
-
     local cls = class.get_class(obj)
-    if call_super then
-        obj = class.get_class(cls.superclass)
-        --assert(cls ~= nil)
-        if cls == nil then
-            -- Normally this shouldn't happen
-            err.raise(vm, error_class.NoMethodError, `no superclass method for {symbol.symid_to_str(sym_id)}`)
-            return
-        end
-    end
 
-    local method = class.get_method(obj, sym_id)
+    local method = if call_super then class.get_super_method(obj, sym_id) else class.get_method(obj, sym_id)
     if not method then
-        err.raise(vm, error_class.NoMethodError, `undefined local variable or method '{symbol.symid_to_str(sym_id)}' for {cls.name}`)
+        if call_super then
+            err.raise(vm, error_class.NoMethodError, `no superclass method for {symbol.symid_to_str(sym_id)}`)
+        else
+            err.raise(vm, error_class.NoMethodError, `undefined local variable or method '{symbol.symid_to_str(sym_id)}' for {cls.name}`)
+        end
         
-        if vm.callinfo_tail ~= nil then
-            (vm.exception.value :: Exception).method_id = vm.callinfo_tail.method_id
+        if #vm.callinfo_stack > 0 then
+            (vm.exception.value :: Exception).method_id = vm.callinfo_stack[#vm.callinfo_stack].method_id
         end
         
         return
@@ -259,7 +250,7 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
 
     if method.type == "luafunc" then
         --local old_idx = vm.current_self_idx
-        local curr_idx = vm.current_self_idx + A
+        local curr_idx = current_self_idx + A
         local statefunc = {
             get_register = function(register: number): Value
                 assert(register >= 0)
@@ -294,71 +285,78 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
         return
     end
 
-    local callinfo = vm:push_callinfo(method.sym_id, A, if block_given then #args - 1 else #args)
-    callinfo.own_class = cls
+    local callinfo = vm:enter_callinfo(
+        method.sym_id, 
+        method.value, 
+        vm.current_callinfo.target_class, 
+        A, 
+        if not block_given then #args else #args - 1
+    )
+    callinfo.self_class = cls
     callinfo.super_called = call_super
-
-    vm.current_irep = method.value
-    vm.inst.cursor = method.value.inst_idx
-    vm.current_self_idx += A
-
-    -- TODO call ruby code from lua and get its return value, but how?
 end
 
-function VM.push_callinfo(vm: VM, method_id: number?, reg_offset: number, num_args: number): CallInfo
+function VM.enter_callinfo(vm: VM, method_id: number?, irep: IREP, target_class: Class, self_idx: number, arg_count: number): CallInfo
     local callinfo: CallInfo = {
-        current_irep = vm.current_irep,
-        inst_idx = vm.inst.cursor,
-        current_self_idx = vm.current_self_idx,
-        target_class = vm.target_class,
-        own_class = nil,
-        method_id = method_id,
-        reg_offset = reg_offset,
-        num_args = num_args,
-        prev = vm.callinfo_tail,
+        irep = irep,
+        inst_cursor_pos = irep.inst_idx,
+        self_reg_idx = vm.current_callinfo.self_reg_idx + self_idx,
+        target_class = target_class,
+        self_class = nil,
+        arg_count = arg_count,
         super_called = false,
-        kdict = nil,
-        returned = false
+        method_id = method_id,
+        deleted_kargs = {},
+        dead = false
     }
+    
+    -- Push current_callinfo to callinfo_stack
+    vm.current_callinfo.inst_cursor_pos = vm.inst.cursor
+    table.insert(vm.callinfo_stack, vm.current_callinfo)
 
-    callinfo.prev = vm.callinfo_tail
-    vm.callinfo_tail = callinfo
+    vm.current_callinfo = callinfo
+    vm.inst.cursor = callinfo.inst_cursor_pos
 
     return callinfo
 end
 
-function VM.pop_callinfo(vm: VM)
-    assert(vm.callinfo_tail ~= nil)
+function VM.exit_callinfo(vm: VM)
+    assert(vm.current_callinfo ~= nil)
 
-    -- Clear used registers
-    for i = vm.current_self_idx + 1, #vm.registers do
+    local callinfo = vm.current_callinfo
+
+    -- Clear remaining registers starting from self_reg_idx + 1
+    for i = callinfo.self_reg_idx + 1, callinfo.self_reg_idx + callinfo.irep.num_regs do
         vm.registers[i] = nil
     end
     
-    local callinfo = vm.callinfo_tail
-    callinfo.kdict = nil
-    callinfo.returned = true
+    callinfo.deleted_kargs = nil :: any
+    callinfo.dead = true
 
     -- Restore VM to its state based on CallInfo
-    vm.inst.cursor = callinfo.inst_idx
-    vm.current_self_idx = callinfo.current_self_idx
-    vm.current_irep = callinfo.current_irep
-    vm.target_class = callinfo.target_class
-    vm.callinfo_tail = callinfo.prev
+    local prev_callinfo = table.remove(vm.callinfo_stack)
+    if prev_callinfo == nil then
+        -- VM finished executing everything
+        vm.should_stop = true
+        return
+    end
+
+    vm.current_callinfo = prev_callinfo
+    vm.inst.cursor = prev_callinfo.inst_cursor_pos
 end
 
 function VM.get_register(vm: VM, register: number)
     assert(register ~= nil)
     assert(register >= 0)
 
-    return vm.registers[vm.current_self_idx + register]
+    return vm.registers[vm.current_callinfo.self_reg_idx + register]
 end
 
 function VM.set_register(vm: VM, register: number, value: Value)
     assert(register ~= nil)
     assert(register >= 0)
 
-    vm.registers[vm.current_self_idx + register] = value
+    vm.registers[vm.current_callinfo.self_reg_idx + register] = value
 end
 
 local execute = {}
@@ -380,7 +378,15 @@ end
 function execute.op_loadl(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local val = value.autocast(vm.current_irep.pool[B + 1])
+    local pool_val = vm.current_callinfo.irep.pool[B + 1]
+    local val: Value= if type(pool_val) == "number" then
+        if math.floor(pool_val) == pool_val then
+            value.autocast(vm.current_callinfo.irep.pool[B + 1], "integer")
+        else
+            value.autocast(vm.current_callinfo.irep.pool[B + 1], "float")
+    else
+        value.autocast(vm.current_callinfo.irep.pool[B + 1])
+
     vm:set_register(A, val)
 end
 
@@ -482,7 +488,7 @@ end
 
 -- R[a] = mrb_int32( (b << 16) + c )
 -- Operands: BSS
-function execute.op_load32(vm: VM, ext: number)
+function execute.op_loadi32(vm: VM, ext: number)
     local A, B, C = opcodes.fetch_BSS(vm.inst, ext)
 
     local num = bit32.lshift(B, 16) + C
@@ -494,7 +500,7 @@ end
 function execute.op_loadsym(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     vm:set_register(A, value.autocast(sym_id, "symbol"))
 end
 
@@ -535,7 +541,7 @@ end
 function execute.op_getgv(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local val = global.globals.get(sym_id)
     if val ~= nil then
         vm:set_register(A, val)
@@ -549,7 +555,7 @@ end
 function execute.op_setgv(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     global.globals.set(sym_id, vm:get_register(A))
 end
 
@@ -572,10 +578,9 @@ end
 function execute.op_getiv(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
 
-    assert(self.type == "object")
     vm:set_register(A, self.value.ivar[sym_id])
 end
 
@@ -584,10 +589,9 @@ end
 function execute.op_setiv(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
 
-    assert(self.type == "object")
     self.value.ivar[sym_id] = vm:get_register(A)
 end
 
@@ -596,10 +600,9 @@ end
 function execute.op_getcv(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
 
-    assert(self.type == "object")
     vm:set_register(A, self.value.class.cvar[sym_id])
 
 end
@@ -609,10 +612,9 @@ end
 function execute.op_setcv(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
 
-    assert(self.type == "object")
     self.value.class.cvar[sym_id] = vm:get_register(A)
 end
 
@@ -621,12 +623,12 @@ end
 function execute.op_getconst(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     
-    local cls: Class = if vm.callinfo_tail ~= nil and vm.callinfo_tail.own_class ~= nil then
-        vm.callinfo_tail.own_class    
+    local cls: Class = if vm.current_callinfo.self_class ~= nil then
+        vm.current_callinfo.self_class
     else
-        vm.target_class
+        vm.current_callinfo.target_class
     
     local val = global.consts.get_class_const(cls, sym_id) or global.consts.get(sym_id)
     if val == nil then
@@ -643,7 +645,7 @@ function execute.op_setconst(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
     local value = vm:get_register(A)
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_register(0)
 
     if self.type == "class" then
@@ -665,7 +667,7 @@ function execute.op_getmcnst(vm: VM, ext: number)
         return
     end
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
 
     local obj = global.consts.get_class_const(val.value, sym_id)
     if obj == nil then
@@ -690,7 +692,7 @@ function execute.op_setmcnst(vm: VM, ext: number)
         return
     end
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     global.consts.set_class_const(val2.value, sym_id, val1)
 end
 
@@ -702,24 +704,10 @@ function execute.op_getupvar(vm: VM, ext: number)
     local proc = vm:get_register(0)
     assert(proc.type == "proc")
 
-    local callinfo = proc.value.callinfo
-    for _ = 1, C do
-        assert(callinfo ~= nil)
-        local val = vm.registers[callinfo.current_self_idx + callinfo.reg_offset]
-        if val.type ~= "proc" then
-            break -- TODO what to do?
-        end
+    local callinfo = vm.callinfo_stack[#vm.callinfo_stack - C]
+    assert(callinfo ~= nil)
 
-        callinfo = (val.value :: Proc).callinfo
-    end
-
-    local val: Value 
-    if callinfo == nil then
-        val = vm:get_register(B)
-    else
-        val = vm.registers[callinfo.current_self_idx + callinfo.reg_offset + B]
-    end
-
+    local val = vm.registers[callinfo.self_reg_idx + B]
     vm:set_register(A, val)
 end
 
@@ -731,21 +719,10 @@ function execute.op_setupvar(vm: VM, ext: number)
     local proc = vm:get_register(0)
     assert(proc.type == "proc")
 
-    local callinfo = proc.value.callinfo
-    for _ = 1, C do
-        assert(callinfo ~= nil)
+    local callinfo = vm.callinfo_stack[#vm.callinfo_stack - C]
+    assert(callinfo ~= nil)
 
-        local val = vm.registers[callinfo.current_self_idx + callinfo.reg_offset]
-        assert(val.type == "proc")
-        
-        callinfo = (val.value :: Proc).callinfo
-    end
-
-    if callinfo == nil then
-        vm:set_register(B, vm:get_register(A))
-    else
-        vm.registers[callinfo.current_self_idx + callinfo.reg_offset + B] = vm:get_register(A)
-    end
+    vm.registers[callinfo.self_reg_idx + B] = vm:get_register(A)
 end
 
 -- R[a] = R[a][R[a+1]]
@@ -816,7 +793,7 @@ function execute.op_jmpuw(vm: VM, ext: number)
         return
     end
 
-    vm.inst.cursor = vm.current_irep.inst_idx + handler.target
+    vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
 end
 
 -- R[a] = exc
@@ -863,7 +840,7 @@ function execute.op_ssend(vm: VM, ext: number)
     local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
 
     vm:set_register(A, vm:get_self())
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
 
     vm:send_by_name(sym_id, A, C)
 end
@@ -874,7 +851,7 @@ function execute.op_ssendb(vm: VM, ext: number)
     local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
 
     vm:set_register(A, vm:get_self())
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     
     vm:send_by_name(sym_id, A, bit32.bor(C, 0x100))
 end
@@ -884,7 +861,7 @@ end
 function execute.op_send(vm: VM, ext: number)
     local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     vm:send_by_name(sym_id, A, C)
 end
 
@@ -893,7 +870,7 @@ end
 function execute.op_sendb(vm: VM, ext: number)
     local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     vm:send_by_name(sym_id, A, bit32.bor(C, 0x100))
 end
 
@@ -908,35 +885,80 @@ end
 function execute.op_super(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
     
-    local callinfo = vm.callinfo_tail
+    local callinfo = vm.current_callinfo
     if callinfo == nil or callinfo.target_class == nil or callinfo.method_id == nil then
         err.raise(vm, error_class.NoMethodError, "super called outside of method")
         return
     end
 
-    -- TODO When module is implemented, check if its a class or a module
-    vm:send_by_name(callinfo.method_id, A, B, true)
-    error("not implemented")    
+    local self = vm:get_register(0)
+    vm:set_register(A, self)
+    vm:send_by_name(callinfo.method_id, A, bit32.bor(B, 0x100), true)
 end
 
 -- R[a] = argument array (16=m5:r1:m5:d1:lv4)
 -- Operands: BS
 function execute.op_argary(vm: VM, ext: number)
     local A, B = opcodes.fetch_BS(vm.inst, ext)
+    local m1_count = bit32.rshift(B, 11)
+    local should_rest = bit32.band(bit32.rshift(B, 10), 0x01) ~= 0
+    local m2_count = bit32.band(bit32.rshift(B, 5), 0x1f)
+    local dict = bit32.band(bit32.rshift(B, 4), 0x01) ~= 0
+    local lv = bit32.band(B, 4)
 
-    local callinfo = vm.callinfo_tail
-    if callinfo == nil or callinfo.target_class == nil or callinfo.method_id == nil then
-        err.raise(vm, error_class.NoMethodError, "super called outside of method")
+    if vm.current_callinfo.method_id == nil then
+        err.raise(vm, error_class.NoMethodError, `super called outside of method`)
         return
     end
 
-    local m1_count = bit32.band(bit32.rshift(B, 11), 0x3f)
-    local rest = bit32.band(bit32.rshift(B, 10), 0x01) ~= 0
-    local m2_count = bit32.band(bit32.rshift(B, 5), 0x1f)
-    local kd = bit32.band(bit32.rshift(B, 4), 0x01) ~= 0
-    local lv_count = bit32.band(B, 0x0f)
+    local reg_idx = if lv == 0 then
+        vm.current_callinfo.self_reg_idx + 1
+    else
+        vm.callinfo_stack[#vm.callinfo_stack - lv - 1].self_reg_idx + 1
 
-    error("not implemented")
+    -- Move all values of m1, *args and m2 arguments into a single array
+    local ary_val = class.instance_new(array_class)
+    local new_ary = ary_val.value :: Array
+    table.move(vm.registers, reg_idx, reg_idx + m1_count - 1, 1, new_ary.array)
+
+    reg_idx += m1_count
+
+    if should_rest then
+        local ary = vm.registers[reg_idx]
+        assert(ary.type == "array", `expected Array but got {ary.type}`)
+
+        table.move(ary.value.array, 1, #ary.value.array, #new_ary.array + 1, new_ary.array)
+        reg_idx += 1
+
+        if m2_count > 0 then
+            table.move(vm.registers, reg_idx, reg_idx + m2_count - 1, #new_ary.array + 1, new_ary.array)
+            reg_idx += m2_count
+        end
+    end
+
+    vm:set_register(A, ary_val)
+
+    if dict then
+        local hash = vm.registers[reg_idx]
+        assert(hash.type == "hash", `expected Hash but got {hash.type}`)
+
+        -- Duplicate the kwarg hash along with deleted OP_KARG keys
+        local dup_hash = class.instance_new(hash_class)
+        for k, v in pairs(hash.value.hash) do
+            (dup_hash.value :: Hash).hash[k] = v
+        end
+
+        for k, v in pairs(vm.current_callinfo.deleted_kargs) do
+            (dup_hash.value :: Hash).hash[k] = v
+        end
+
+        vm:set_register(A + 1, dup_hash)
+        reg_idx += 1
+    end
+    
+    local proc = vm.registers[reg_idx]
+    assert(proc.type == "proc" or proc.type == "nil", `expected Proc? but got {proc.type}`)
+    vm:set_register(A + 2, proc)
 end
 
 -- arg setup according to flags (23=m5:o5:r1:m5:k5:d1:b1)
@@ -944,16 +966,16 @@ end
 function execute.op_enter(vm: VM, ext: number)
     local A = opcodes.fetch_W(vm.inst, ext)
     local m1_count = bit32.rshift(A, 18)
-    local optional_count = bit32.band(bit32.rshift(A, 13), 0x1f)
-    local should_rest = bit32.band(bit32.rshift(A, 12), 0x01) ~= 0
+    local optional_count = bit32.extract(bit32.rshift(A, 13), 0x1f)
+    local should_rest = bit32.btest(A, 0x1000)
     local m2_count = bit32.band(bit32.rshift(A, 7), 0x1f)
     local kwargs_count = bit32.band(bit32.rshift(A, 2), 0x1f)
-    local should_dict = bit32.band(bit32.rshift(A, 1), 0x01) ~= 0
-    local check_block = bit32.band(A, 0x01) ~= 0
+    local should_dict = bit32.btest(A, 0x02)
+    local check_block = bit32.btest(A, 0x01)
 
-    assert(vm.callinfo_tail ~= nil)
-
-    local args_given = vm.callinfo_tail.num_args
+    assert(#vm.callinfo_stack > 0)
+    
+    local args_given = vm.current_callinfo.arg_count
     local reg_idx = m1_count + optional_count + 1
 
     if args_given < m1_count then
@@ -1004,8 +1026,6 @@ function execute.op_enter(vm: VM, ext: number)
         local hash = vm:get_register(args_given) -- Last argument is the Hash
         assert(hash.type == "hash")
 
-        vm.callinfo_tail.kdict = hash.value
-
         vm:set_register(reg_idx, hash)
         reg_idx += 1
     end
@@ -1024,7 +1044,7 @@ function execute.op_enter(vm: VM, ext: number)
     end
 
     -- Set new number of arguments (don't include proc)
-    vm.callinfo_tail.num_args = reg_idx - 2
+    vm.current_callinfo.arg_count = reg_idx - 2
 
     -- Jump depending on the amount of optional arguments
     local jump_offset = args_given - m1_count
@@ -1048,12 +1068,12 @@ end
 function execute.op_key_p(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
     
-    assert(vm.callinfo_tail ~= nil)
+    assert(#vm.callinfo_stack > 0)
 
-    local kdict = vm:get_register(vm.callinfo_tail.num_args)
+    local kdict = vm:get_register(vm.current_callinfo.arg_count)
     assert(kdict.type == "hash")
 
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
 
     for _, v in kdict.value.hash do
         if v.type == "symbol" and v.value.sym_id == sym_id then
@@ -1068,9 +1088,9 @@ end
 -- raise unless kdict.empty?
 -- Operands: Z
 function execute.op_keyend(vm: VM, ext: number)
-    assert(vm.callinfo_tail ~= nil)
+    assert(#vm.callinfo_stack > 0)
 
-    local kdict = vm:get_register(vm.callinfo_tail.num_args)
+    local kdict = vm:get_register(vm.current_callinfo.arg_count)
     assert(kdict.type == "hash")
 
     if #kdict.value.hash > 0 then
@@ -1084,25 +1104,22 @@ end
 function execute.op_karg(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    assert(vm.callinfo_tail ~= nil)
+    assert(#vm.callinfo_stack > 0)
 
-    local kdict = vm:get_register(vm.callinfo_tail.num_args)
+    local kdict = vm:get_register(vm.current_callinfo.arg_count)
     assert(kdict.type == "hash")
     
-    local sym_id = vm.current_irep.syms[B + 1]
-    local ret: Value?
-    for k, v in kdict.value.hash do
-        if v.type == "symbol" and v.value.sym_id == sym_id then
-            ret = v
-            kdict.value.hash[k] = nil
-            break
-        end
-    end
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
+    local sym = value.autocast(sym_id, "symbol")
+    local ret = kdict.value.hash[sym]
 
     if ret == nil then
-        err.raise(vm, error_class.ArgumentError, `missing keyword: {sym_id}`)
+        err.raise(vm, error_class.ArgumentError, `missing keyword: {symbol.symid_to_str(sym_id)}`)
         return
     end
+
+    kdict.value.hash[sym_id] = nil
+    vm.current_callinfo.deleted_kargs[sym] = ret
 
     vm:set_register(A, ret)
 end
@@ -1113,32 +1130,45 @@ function execute.op_return(vm: VM, ext: number)
     local A = opcodes.fetch_B(vm.inst, ext)
 
     -- Jump to ensure if exists
-    local handler = vm:get_catch_handler("ensure")
-    if handler then
-        vm.inst.cursor = vm.current_irep.inst_idx + handler.target
-        return
+    do
+        local handler = vm:get_catch_handler("ensure")
+        if handler then
+            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+            return
+        end
     end
 
     -- Ignore and stop the VM if it's a top level return
-    local callinfo = vm.callinfo_tail
-
-    if vm.target_callinfo ~= nil then
-        -- There is a saved return value from OP_RETURN_BLK (we can assume we are here due to an ensure)
-        -- As you can explicitly return in an ensure, we need to make sure whether the ensure has a return or not
-        -- If this return is the last instruction then we can assume that the ensure doesn't have an explicit return
-        if vm.inst.cursor == vm.current_irep.inst_idx + vm.current_irep.num_instructions - 2 then
-            vm:pop_callinfo()
-            return
-        end
-
-        -- ensure has an explicit return, so we discard the return value (CRuby seems to do this)
-        vm.target_callinfo = nil
-        vm.return_value = nil
-    end
-    
-    if callinfo == nil then
+    if #vm.callinfo_stack == 0 then
         vm.should_stop = true
         return
+    end
+
+    local callinfo = vm.current_callinfo
+
+    if vm.ensure_state.ensuring then
+        -- Handle different cases for an explicit and implicit return in an ensure block
+        -- The last instruction of a callinfo (aka OP_RETURN) is an implicit return
+        if vm.inst.cursor == callinfo.irep.num_instructions then
+            -- Implicit return
+            while vm.ensure_state.target_callinfo ~= vm.current_callinfo do
+                vm:exit_callinfo()
+                
+                local handler = vm:get_catch_handler("ensure")
+                if handler then
+                    vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+                    return
+                end
+            end
+
+            vm:set_register(0, vm.ensure_state.return_value)
+            vm:exit_callinfo()
+        else
+            -- Explicit return
+            vm.ensure_state.ensuring = false
+            vm.ensure_state.target_callinfo = nil :: any
+            vm.ensure_state.return_value = nil :: any
+        end
     end
     
     -- Ignore initialize method's return as that always returns a new object of a Class (internally done via a lua function)
@@ -1147,7 +1177,7 @@ function execute.op_return(vm: VM, ext: number)
         vm:set_register(0, ret)
     end
     
-    vm:pop_callinfo()
+    vm:exit_callinfo()
 end
 
 -- return R[a] (in-block return)
@@ -1158,31 +1188,43 @@ function execute.op_return_blk(vm: VM, ext: number)
     
     local self = vm:get_register(0)
 
-    assert(self.type == "proc")
+    assert(self.type == "proc", `instruction OP_RETURN_BLK should be in a block`)
     local proc = self.value
     
-    -- Go back to the level where the proc was generated
-    while vm.callinfo_tail ~= nil or vm.callinfo_tail ~= proc.callinfo_self do
-        -- Be sure to jump to ensures
-        local handler = vm:get_catch_handler("ensure")
-        if handler then
-            vm.inst.cursor = vm.current_irep.inst_idx + handler.target
-            vm.return_value = ret
-            vm.target_callinfo = proc.callinfo_self
-            return
-        end
+    if vm.ensure_state.ensuring then
+        -- The instruction should stop carrying forward return values from 
+        -- previous OP_BREAK and OP_RETURN_BLK, so we disable the ensure state
 
-        vm:pop_callinfo()
+        vm.ensure_state.ensuring = false
+        vm.ensure_state.target_callinfo = nil :: any
+        vm.ensure_state.return_value = nil :: any
     end
 
-    -- TODO check this lol
-    if vm.callinfo_tail == nil or vm.callinfo_tail.returned then
-        err.raise(vm, error_class.LocalJumpError, "unexpected return")
+    if proc.embracing_callinfo.dead then
+        -- TODO Make the error message more clear
+        err.raise(vm, error_class.LocalJumpError, `unexpected return`)
         return
     end
 
+    -- Go back to the level where the proc was generated
+    while proc.embracing_callinfo ~= vm.current_callinfo do
+        -- Be sure to jump to ensures
+        local handler = vm:get_catch_handler("ensure")
+        if handler then
+            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+
+            -- Enable the ensure state so the return value can carry forward
+            vm.ensure_state.ensuring = true
+            vm.ensure_state.return_value = ret
+            vm.ensure_state.target_callinfo = proc.embracing_callinfo
+            return
+        end
+
+        vm:exit_callinfo()
+    end
+
     vm:set_register(0, ret)
-    vm:pop_callinfo()
+    vm:exit_callinfo()
 end
 
 -- break R[a]
@@ -1192,55 +1234,60 @@ function execute.op_break(vm: VM, ext: number)
     local ret = vm:get_register(A)
 
     local self = vm:get_register(0)
-    local callinfo = vm.callinfo_tail
-    if self.type ~= "proc" or callinfo == nil then
+    if self.type ~= "proc" then
         -- TODO verify
         err.raise(vm, error_class.LocalJumpError, "unexpected break")
         return
     end
 
-    assert(self.type == "proc")
     local proc = self.value
-    
-    if vm.callinfo_tail == nil then
-        err.raise(vm, error_class.LocalJumpError, "unexpected break")
+    assert(proc.caller_callinfo ~= nil)
+
+    if proc.type ~= "lambda" and proc.caller_callinfo.dead then
+        err.raise(vm, error_class.LocalJumpError, `break from proc-closure`)
         return
     end
-    
-    -- If it's lambda, treat break as return
+
+    if vm.ensure_state.ensuring then
+        -- The instruction should stop carrying forward return values from 
+        -- previous OP_BREAK and OP_RETURN_BLK, so we disable the ensure state
+
+        vm.ensure_state.ensuring = false
+        vm.ensure_state.target_callinfo = nil :: any
+        vm.ensure_state.return_value = nil :: any
+    end
+
+    -- If it's lambda, treat OP_BREAK as OP_RETURN
     local handler = vm:get_catch_handler("ensure")
     if proc.type == "lambda" then
         if handler then
-            vm.inst.cursor = vm.current_irep.inst_idx + handler.target
+            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
         else
             vm:set_register(0, ret)
-            vm:pop_callinfo()
+            vm:exit_callinfo()
         end
 
         return
     end
 
-    -- Break returns the block and the caller calling the block (verify)
-    local target_callinfo = proc.callinfo.prev
-    -- if target_callinfo ~= nil and target_callinfo.returned then
-    --     err.raise(vm, error_class.LocalJumpError, "break from proc-closure")
-    --     return
-    -- end
-
     -- Loop for handling ensure
-    while vm.callinfo_tail ~= nil or vm.callinfo_tail ~= target_callinfo do
+    while proc.caller_callinfo ~= vm.current_callinfo do
+        handler = vm:get_catch_handler("ensure")
         if handler then
-            vm.inst.cursor = vm.current_irep.inst_idx + handler.target
-            vm.return_value = ret
-            vm.target_callinfo = proc.callinfo_self
+            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+
+            -- Enable the ensure state so the return value can carry forward
+            vm.ensure_state.ensuring = true
+            vm.ensure_state.return_value = ret
+            vm.ensure_state.target_callinfo = proc.embracing_callinfo
             return
         end
 
-        vm:pop_callinfo()
+        vm:exit_callinfo()
     end
 
-    
-    --err.raise(vm, error_class.LocalJumpError, "unexpected break")
+    vm:set_register(0, ret)
+    vm:exit_callinfo()
 end
 
 -- R[a] = block (16=m5:r1:m5:d1:lv4)
@@ -1261,13 +1308,13 @@ function execute.op_blkpush(vm: VM, ext: number)
         block = vm:get_register(offset)
     else
         local proc = vm:get_register(0)
-        if proc.type ~= "proc" or proc.value.callinfo_self == nil or proc.value.callinfo_self.current_irep.num_regs <= offset then
+        if proc.type ~= "proc" or proc.value.embracing_callinfo == nil or proc.value.embracing_callinfo.irep.num_regs <= offset then
             err.raise(vm, error_class.LocalJumpError, `unexpected yield`)
             return
         end
 
-        local callinfo = proc.value.callinfo_self
-        block = vm.registers[callinfo.current_self_idx + callinfo.reg_offset + offset]
+        local callinfo = proc.value.embracing_callinfo
+        block = vm.registers[callinfo.self_reg_idx + offset]
     end
 
     if block.type ~= "proc" then
@@ -1352,10 +1399,9 @@ function execute.op_subi(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
     
     local val1 = vm:get_register(A)
-    local val2 = value.autocast(B, "integer")
 
     if val1.type == "integer" or val1.type == "float" then 
-        val1.value -= val2.value
+        vm:set_register(A, value.autocast(val1.value.number - B, val1.type))
         return
     end
 
@@ -1659,7 +1705,7 @@ end
 function execute.op_symbol(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local sym_str = vm.current_irep.pool[B + 1]
+    local sym_str = vm.current_callinfo.irep.pool[B + 1]
     assert(type(sym_str) == "string")
 
     local sym_id = symbol.str_to_symid(sym_str)
@@ -1671,7 +1717,7 @@ end
 function execute.op_string(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local str = vm.current_irep.pool[B + 1]
+    local str = vm.current_callinfo.irep.pool[B + 1]
     assert(type(str) == "string")
 
     local new_str_val = class.instance_new(string_class)
@@ -1759,7 +1805,7 @@ end
 function execute.op_lambda(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local new_proc = proc_new(vm, vm.current_irep.children[B + 1], "lambda")
+    local new_proc = proc_new(vm, vm.current_callinfo.irep.children[B + 1], "lambda")
     
     vm:set_register(A, {
         type = "proc",
@@ -1772,7 +1818,7 @@ end
 function execute.op_block(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local new_proc = proc_new(vm, vm.current_irep.children[B + 1], "block")
+    local new_proc = proc_new(vm, vm.current_callinfo.irep.children[B + 1], "block")
     
     vm:set_register(A, {
         type = "proc",
@@ -1787,7 +1833,7 @@ function execute.op_method(vm: VM, ext: number)
 
     -- Currently methods are like lambda
     -- TODO Make them into the Method class
-    local new_proc = proc_new(vm, vm.current_irep.children[B + 1], "method")
+    local new_proc = proc_new(vm, vm.current_callinfo.irep.children[B + 1], "method")
     
     vm:set_register(A, {
         type = "proc",
@@ -1825,7 +1871,7 @@ end
 function execute.op_class(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
     
-    local class_name = symbol.symid_to_str(vm.current_irep.syms[B + 1]) :: string
+    local class_name = symbol.symid_to_str(vm.current_callinfo.irep.syms[B + 1]) :: string
     local outer = vm:get_register(A)
     local val = vm:get_register(A + 1)
     local super = if val.type == "class" then val.value else object_class
@@ -1852,7 +1898,23 @@ end
 -- Operands: BB
 function execute.op_module(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
-    error("not implemented")
+    
+    local module_name = symbol.symid_to_str(vm.current_callinfo.irep.syms[B + 1]) :: string
+    local outer = vm:get_register(A)
+
+    local new_module: Class
+    if outer.type == "class" then
+        new_module = class.define_class_under(vm, outer.value, module_name, module_class)
+    else
+        new_module = class.define_class(vm, module_name, module_class)
+    end
+
+    new_module.is_module = true
+
+    vm:set_register(A, {
+        type = "class",
+        value = new_module
+    })
 end
 
 -- R(a) = blockexec(R(a),Irep(b))
@@ -1861,15 +1923,10 @@ function execute.op_exec(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
     local val = vm:get_register(A)
-    assert(val.type == "class") -- TODO Support Module
+    assert(val.type == "class")
 
-    local callinfo = vm:push_callinfo(0, A, 0)
-
-    vm.current_irep = vm.current_irep.children[B + 1]
-    vm.inst.cursor = vm.current_irep.inst_idx
-    vm.current_self_idx += A
-    vm.target_class = val.value
-    vm.callinfo_tail = callinfo
+    local child_irep = vm.current_callinfo.irep.children[B + 1]
+    vm:enter_callinfo(nil, child_irep, val.value, A, 0)
 end
 
 -- R(a).newmethod(Syms(b),R(a+1)); R(a) = Syms(b)
@@ -1883,7 +1940,7 @@ function execute.op_def(vm: VM, ext: number)
     local val2 = vm:get_register(A + 1)
     assert(val2.type == "proc")
     
-    local sym_id = vm.current_irep.syms[B + 1]
+    local sym_id = vm.current_callinfo.irep.syms[B + 1]
     
     val1.value.definitions[sym_id] = {
         sym_id = sym_id,
@@ -1900,10 +1957,10 @@ end
 function execute.op_alias(vm: VM, ext: number)
     local A, B = opcodes.fetch_BB(vm.inst, ext)
 
-    local method_id = vm.current_irep.syms[A + 1]
-    local alias_id = vm.current_irep.syms[B + 1]
+    local method_id = vm.current_callinfo.irep.syms[A + 1]
+    local alias_id = vm.current_callinfo.irep.syms[B + 1]
 
-    local cls = vm.target_class
+    local cls = vm.current_callinfo.target_class
     if class.get_method(cls, method_id) == nil then
         err.raise(vm, error_class.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
         return
@@ -1917,9 +1974,9 @@ end
 function execute.op_undef(vm: VM, ext: number)
     local A = opcodes.fetch_B(vm.inst, ext)
 
-    local method_id = vm.current_irep.syms[A + 1]
+    local method_id = vm.current_callinfo.irep.syms[A + 1]
 
-    local cls = vm.target_class
+    local cls = vm.current_callinfo.target_class
     if class.get_method(cls, method_id) == nil then
         err.raise(vm, error_class.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
         return
@@ -1947,7 +2004,7 @@ function execute.op_tclass(vm: VM, ext: number)
     local A = opcodes.fetch_B(vm.inst, ext)
     vm:set_register(A, {
         type = "class",
-        value = vm.target_class
+        value = vm.current_callinfo.target_class
     })
 end
 
@@ -1963,74 +2020,8 @@ end
 function execute.op_err(vm: VM, ext: number)
     local A = opcodes.fetch_B(vm.inst, ext)
     
-    local message = vm.current_irep.pool[A + 1]
+    local message = vm.current_callinfo.irep.pool[A + 1]
     err.raise(vm, error_class.LocalJumpError, tostring(message))
-end
-
-function VM.read_instruction(vm: VM): ("continue" | "stop" | "error")
-    local inst = vm.inst:read_byte()
-    local opcode = opcodes.opcodes[inst]
-    assert(opcode ~= nil, `unknown opcode {inst}`)
-    
-    if opcode == "OP_EXT1" then
-        vm.ext = 1
-        return "continue"
-    elseif opcode == "OP_EXT2" then
-        vm.ext = 2
-        return "continue"
-    elseif opcode == "OP_EXT3" then
-        vm.ext = 3
-        return "continue"
-    elseif opcode == "OP_STOP" then
-        return "stop"
-    end
-
-    local func: ((vm: VM, ext: number) -> ())? = execute[ opcode:lower() ]
-    assert(func ~= nil, `unknown or not implemented opcode: {inst} {opcode}`)
-    
-    if vm.debug_mode then
-        print(`executing opcode: {tostring(opcode)}`) -- debug
-    end
-    func(vm, vm.ext)
-
-    if vm.debug_mode then
-        print(`registers (after executing): (-> {vm.current_self_idx})`)
-        for i, v in vm.registers do
-            print(`  {i} = {if v.type == "object" then `#<{v.value.class.name}:{tostring(v.value):sub(#("table: ") + 1)}>` elseif v.type == "class" then v.value.name elseif v.type == "integer" then `int({v.value})` else v.type}`)
-        end
-        print("")
-    end
-
-    if vm.ext ~= 0 then
-        vm.ext = 0
-    end
-
-    if vm.should_stop then
-        return "stop"
-    end
-
-    if vm.exception.type == "nil" then
-        return "continue"
-    end
-    
-    -- Handle exceptions and catch handlers
-    while true do
-        -- We should first search for a rescue, if not then an ensure
-        local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
-        if handler then
-            vm.inst.cursor = vm.current_irep.inst_idx + handler.target
-            return "continue"
-        end
-
-        -- We reached the end and couldn't find a catch handler
-        if not vm.callinfo_tail then
-            return "error"
-        end
-
-        vm:pop_callinfo()
-    end
-
-    assert(false, `this shouldn't be reachable`)
 end
 
 function VM.run(vm: VM)
@@ -2062,7 +2053,7 @@ function VM.run(vm: VM)
         func(vm, ext)
     
         if vm.debug_mode then
-            print(`registers (after executing): (-> {vm.current_self_idx})`)
+            print(`registers (after executing): (-> {vm.current_callinfo.self_reg_idx})`)
             for i, v in vm.registers do
                 print(`  {i} = {if v.type == "object" then `#<{v.value.class.name}:{tostring(v.value):sub(#("table: ") + 1)}>` elseif v.type == "class" then v.value.name elseif v.type == "integer" then `int({v.value})` else v.type}`)
             end
@@ -2086,14 +2077,14 @@ function VM.run(vm: VM)
             -- We should first search for a rescue, if not then an ensure
             local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
             if handler then
-                vm.inst.cursor = vm.current_irep.inst_idx + handler.target
+                vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
                 break
             end
     
             -- We reached the end and couldn't find a catch handler
-            if not vm.callinfo_tail then
+            if #vm.callinfo_stack == 0 then
                 local ex = vm.exception.value :: Exception
-                local msg = `{ex.message} ({ex.class.name})`
+                local msg = `in '{ex.method_id}': {ex.message} ({ex.class.name})`
     
                 for i = #ex.call_nest, 1, -1 do
                     msg ..= `\n    in '{symbol.symid_to_str(ex.call_nest[i])}'`
@@ -2102,7 +2093,7 @@ function VM.run(vm: VM)
                 error(msg)
             end
     
-            vm:pop_callinfo()
+            vm:exit_callinfo()
         end
     end
 end

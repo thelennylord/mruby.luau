@@ -27,12 +27,15 @@ export type Instance = unknown
 export type Class = Object & {
     name: string,
     sym_id: number,
-    is_singleton: boolean,
-    attached_object: Object?, -- not nil if is_singleton == true
     superclass: Class,
     subclasses: { Class },
     cvar: KeyValue,
-    definitions: { [number]: Method } -- new_obj.methods = definitions when :new is sent
+    definitions: { [number]: Method }, -- new_obj.methods = definitions when :new is sent
+
+    is_singleton: boolean,
+    attached_object: Object?, -- not nil if is_singleton == true
+
+    is_module: boolean -- Interface class
 }
 
 export type Object = {
@@ -75,8 +78,8 @@ export type Hash = Object & {
 
 export type Proc = Object & {
     type: "lambda" | "block" | "method",
-    callinfo: CallInfo,
-    callinfo_self: CallInfo,
+    caller_callinfo: CallInfo?,
+    embracing_callinfo: CallInfo,
     irep: IREP,
 }
 
@@ -111,50 +114,51 @@ export type IREP = {
 }
 
 export type CallInfo = {
-    prev: CallInfo?,
-    current_irep: IREP,
-    inst_idx: number,
-    current_self_idx: number,
+    irep: IREP,
+    inst_cursor_pos: number,
+    self_reg_idx: number,
     target_class: Class,
-
-    own_class: Class?,
+    dead: boolean,
+    
+    arg_count: number,
+    self_class: Class?,
     method_id: number?,
-    reg_offset: number,
-    num_args: number,
-    kdict: Hash?,
-    super_called: boolean
+    deleted_kargs: { [Value] : Value },
+    super_called: boolean,
+}
+
+type VMEnsure = {
+    ensuring: boolean,
+    target_callinfo: CallInfo,
+    return_value: Value
 }
 
 export type VM = {
     id: number,
     should_stop: boolean,
     permanence: boolean,
-
     top_irep: IREP,
-    current_irep: IREP,
-    callinfo_tail: CallInfo?,
     inst: ByteStream, -- pointer to instruction in binary stream
-    target_class: Class,
-    reg_size: number,
-    current_self_idx: number,
     registers: { Value },
-    return_value: Value?,
-    target_callinfo: CallInfo?,
     exception: Value,
     debug_mode: boolean,
-    ext: number,
+
+    callinfo_stack: { CallInfo },
+    current_callinfo: CallInfo,
+
+    ensure_state: VMEnsure,
 
     -- Methods
     -- Gets the register relative to current_reg (Indexing begins from 1 just like lua)
     get_register: (self: VM, register: number) -> Value,
     set_register: (self: VM, register: number, value: Value) -> (),
-    push_callinfo: (self: VM, method_id: number, reg_offset: number, num_args: number) -> CallInfo,
-    pop_callinfo: (self: VM) -> (),
+    enter_callinfo: (self: VM, method_id: number?, irep: IREP, target_class: Class, self_idx: number, arg_count: number) -> CallInfo,
+    exit_callinfo: (self: VM) -> (),
     send_by_name: (self: VM, sym_id: number, A: number, C: number, super_called: boolean?, __wait_until_done: boolean?) -> (), -- __wait_until_done is used internally, do not use!
     get_self: (self: VM) -> Value,
     get_catch_handler: (self: VM, handler_type: string) -> CatchHandler?,
     read_instruction: (self: VM) -> ("continue" | "stop" | "error")
-}
+};
 --end
 
 --type value.luau

@@ -52,7 +52,7 @@ class.define_method(String, "initialize", function(state: State, argc: number)
 end)
 
 class.define_method(String, "+", function(state: State, argc: number)
-    if argc ~= 0 then
+    if argc ~= 1 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
@@ -74,7 +74,7 @@ class.define_method(String, "+", function(state: State, argc: number)
 end)
 
 class.define_method(String, "*", function(state: State, argc: number)
-    if argc ~= 0 then
+    if argc ~= 1 then
         err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end

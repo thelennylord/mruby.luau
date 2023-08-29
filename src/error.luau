@@ -15,11 +15,10 @@ local function sub_exception_new(vm: VM, exc_class: Class): Exception
     local obj = val.value :: Exception
     
     -- TODO: verify if the modification works
-    local callinfo = vm.callinfo_tail
-    while callinfo ~= nil do
+    for i = #vm.callinfo_stack, 1, -1 do        
+        local callinfo = vm.callinfo_stack[i]
         local method_id = callinfo.method_id or 0
         table.insert(obj.call_nest, method_id)
-        callinfo = callinfo.prev
     end
 
     return obj
