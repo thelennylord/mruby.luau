@@ -2,16 +2,14 @@
 local class = require("class")
 local types = require("types")
 local value = require("value")
-local err = require("error")
-local error_class = require("builtins/errors")
-local object_class = require("builtins/object")
+local exception = require("exception")
 
 type VM = types.VM
 type String = types.String
 type Value = types.Value
 type State = types.State
 
-local String = class.define_class(nil, "String", object_class)
+local String = class.define_class(nil, "String", nil :: any)
 
 -- TODO Deprecate this function and make use of class.instance_new
 local function str_new(str: string): String
@@ -26,12 +24,12 @@ class.define_method(String, "initialize", function(state: State, argc: number)
     local val = state.get_register(0)
     if argc == 1 and val.type ~= "string" then
         local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into String`)
         return
     end
     
     if argc > 1 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0..1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 0..1)`)
         return
     end
 
@@ -53,7 +51,7 @@ end)
 
 class.define_method(String, "+", function(state: State, argc: number)
     if argc ~= 1 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -63,7 +61,7 @@ class.define_method(String, "+", function(state: State, argc: number)
     local val = state.get_register(1)
     if val.type ~= "string" then
         local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into String`)
         return
     end
 
@@ -75,7 +73,7 @@ end)
 
 class.define_method(String, "*", function(state: State, argc: number)
     if argc ~= 1 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -87,7 +85,7 @@ class.define_method(String, "*", function(state: State, argc: number)
     if val.type ~= "integer" then
         if val.type ~= "float" then
             local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
-            err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String`)
+            exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into String`)
             return
         end
 
@@ -104,7 +102,7 @@ end)
 
 local str_len = function(state: State, argc: number)
     if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -119,7 +117,7 @@ class.define_method(String, "length", str_len)
 
 class.define_method(String, "to_i", function(state: State, argc: number)
     if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -137,7 +135,7 @@ end)
 
 class.define_method(String, "to_f", function(state: State, argc: number)
     if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -155,7 +153,7 @@ end)
 
 class.define_method(String, "to_s", function(state: State, argc: number)
     if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -167,7 +165,7 @@ end)
 
 class.define_method(String, "<<", function(state: State, argc: number)
     if argc ~= 1 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -184,7 +182,7 @@ class.define_method(String, "<<", function(state: State, argc: number)
     else
         -- TODO Call to_s of other types
         local value_type = if val.type == "object" then class.get_class(val.value).name else val.type:gsub("^%l", string.upper)
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
         return
     end
 
@@ -193,7 +191,7 @@ end)
 
 class.define_method(String, "[]", function(state: State, argc: number)
     if argc ~= 1 or argc ~= 2 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1..2)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1..2)`)
         return
     end
 
@@ -209,7 +207,7 @@ class.define_method(String, "[]", function(state: State, argc: number)
     else
         -- TODO Call to_s of other types
         local value_type = if val1.type == "object" then class.get_class(val1.value).name else val1.type:gsub("^%l", string.upper)
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
         return
     end
 
@@ -220,7 +218,7 @@ class.define_method(String, "[]", function(state: State, argc: number)
         else
             -- TODO Call to_s of other types
             local value_type = if val2.type == "object" then class.get_class(val2.value).name else val1.type:gsub("^%l", string.upper)
-            err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
+            exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into String (calling of to_s isn't implemented yet)`)
             return
         end
     else
@@ -234,4 +232,4 @@ class.define_method(String, "[]", function(state: State, argc: number)
     })
 end)
 
-return String
+return {}

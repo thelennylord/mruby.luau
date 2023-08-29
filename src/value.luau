@@ -12,65 +12,22 @@ type Object = types.Object
 type Integer = types.Integer
 type Float = types.Float
 type Symbol = types.Symbol
+type IntegerValue = types.IntegerValue
+type FloatValue = types.FloatValue
+type SymbolValue = types.SymbolValue
+type TrueValue = types.TrueValue
+type FalseValue = types.FalseValue
+type NilValue = types.NilValue
 
-local static_values: { [boolean | string | "nil"]: Value } = {}
+local singleton_instances: { [string]: Value } = {
+    True = class.instance_new(class.builtins.TrueClass),
+    False = class.instance_new(class.builtins.FalseClass),
+    Nil = class.instance_new(class.builtins.NilClass)
+}
 
-local function get_static_number(value: number, _type: "integer" | "float" | "symbol"): Value
-    if _type == "integer" then
-        local key = "i" .. value
-        if static_values[key] == nil then
-            local int = class.instance_new(class.get_class_from_name("Integer") :: Class).value :: Integer
-            int.number = math.floor(value)
-            
-            static_values[key] = {
-                type = "integer",
-                value = int
-            }
-            
-            table.freeze(int)
-            table.freeze(static_values[key])
-            
-        end
-
-        return static_values[key]
-        
-    elseif _type == "float" then
-        local key = "f" .. value
-        if static_values[key] == nil then
-            local float = class.instance_new(class.get_class_from_name("Integer") :: Class).value :: Float
-            float.number = value
-
-            static_values[key] = {
-                type = "float",
-                value = float
-            }
-
-            table.freeze(float)
-            table.freeze(static_values[key])
-        end
-
-        return static_values[key]
-
-    elseif _type == "symbol" then
-        local key = "s" .. value
-        if static_values[key] == nil then
-            local symbol = class.instance_new(class.get_class_from_name("Symbol") :: Class).value :: Symbol
-            symbol.sym_id = value
-
-            static_values[key] = {
-                type = "symbol",
-                value = symbol
-            }
-
-            table.freeze(symbol)
-            table.freeze(static_values[key])
-        end
-
-        return static_values[key]
-    end
-
-    error(`could not determine value cast for number {value} (is it an integer or a float?)`)
-end
+(singleton_instances.True :: TrueValue).type = "true"
+(singleton_instances.False:: FalseValue).type = "false"
+(singleton_instances.Nil :: NilValue).type = "nil"
 
 local function compare(val1: Value, val2: Value): number
     if (val1.type == "integer" or val1.type == "float") and (val2.type == "integer" or val2.type == "float") then
@@ -81,43 +38,50 @@ local function compare(val1: Value, val2: Value): number
 end
 
 -- Immediate values
-local function autocast(value: any, _type: string?): Value
-    local valType = type(value)
+local function autocast(value: unknown, _type: string?): Value
+    if type(value) == "boolean" then
+        return if value then singleton_instances.True else singleton_instances.False
 
-    if valType == "number" then
-        assert(type(value) == "number")
-
-        if _type == "integer" or _type == "float" or _type == "symbol" then
-            return get_static_number(value, _type)
+    elseif type(value) == "nil" then
+        return singleton_instances.Nil
+    
+    elseif type(value) == "number" then
+        if _type == "integer" then
+            local key = "i" .. value
+            if singleton_instances[key] == nil then
+                local int_value: IntegerValue = class.instance_new(class.builtins.Integer)
+                int_value.type = "integer"
+                int_value.value.number = math.floor(value)
+                singleton_instances[key] = int_value
+            end
+    
+            return singleton_instances[key]
+            
+        elseif _type == "float" then
+            local key = "f" .. value
+            if singleton_instances[key] == nil then
+                local float_value: FloatValue = class.instance_new(class.builtins.Float)
+                float_value.type = "float"
+                float_value.value.number = value
+    
+                singleton_instances[key] = float_value
+            end
+    
+            return singleton_instances[key]
+    
+        elseif _type == "symbol" then
+            local key = "s" .. value
+            if singleton_instances[key] == nil then
+                local symbol_value: SymbolValue = class.instance_new(class.builtins.Symbol)
+                symbol_value.type = "symbol"
+                symbol_value.value.sym_id = value
+                singleton_instances[key] = symbol_value
+            end
+    
+            return singleton_instances[key]
         end
-
-    elseif valType == "boolean" then
-        assert(type(value) == "boolean")
-
-        if value == true and not static_values[true] then
-            static_values[true] = {
-                type = "true",
-                value = class.instance_new(class.get_class_from_name("TrueClass") :: Class).value :: TrueClass
-            }
-        end
-
-        if value == false and not static_values[false] then
-            static_values[false] = {
-                type = "false",
-                value = class.instance_new(class.get_class_from_name("FalseClass") :: Class).value :: FalseClass
-            }
-        end
-
-        return static_values[value]
-
-    elseif valType == "nil" then
-        if not static_values["nil"] then
-            static_values["nil"] = {
-                type = "nil",
-                value = class.instance_new(class.get_class_from_name("NilClass") :: Class).value :: NilClass
-            }
-        end
-        return static_values["nil"]
+    
+        error(`could not determine value cast for number {value} (is it an integer or a float?)`)
     end
 
     error("could not determine type to cast value into")

@@ -1,11 +1,8 @@
 --!strict
 local types = require("types")
 local class = require("class")
-local err = require("error")
+local exception = require("exception")
 local value = require("value")
-
-local error_class = require("builtins/errors")
-local object_class = require("builtins/object")
 
 type VM = types.VM
 type Value = types.Value
@@ -14,18 +11,18 @@ type State = types.State
 type String = types.String
 type Class = types.Class
 
-local FalseClass = class.define_class(nil, "FalseClass", object_class)
+local FalseClass = class.define_class(nil, "FalseClass", nil :: any)
 
 class.define_method(FalseClass, "&", function(state: State, argc: number)
     if argc > 1 or argc == 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 end)
 
 class.define_method(FalseClass, "^", function(state: State, argc: number)
     if argc > 1 or argc == 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
         return
     end
 
@@ -39,11 +36,11 @@ class.alias_method(FalseClass, "|", "^")
 
 class.define_method(FalseClass, "to_s", function(state: State, argc: number)
     if argc > 0 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
     end
 
-    local ret = class.instance_new(class.get_class_by_name("String") :: Class);
+    local ret = class.instance_new(class.builtins.String);
     (ret.value :: String).str = "false"
 
     state.set_register(0, ret)

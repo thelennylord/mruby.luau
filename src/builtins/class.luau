@@ -2,14 +2,10 @@
 local types = require("types")
 local class = require("class")
 local symbol = require("symbol")
-local err = require("error")
+local exception = require("exception")
 local value= require("value")
 
-local object_class = require("builtins/object")
-local error_class = require("builtins/errors")
-local array_class = require("builtins/array")
-
-local Class = class.define_class(nil, "Class", object_class)
+local Class = class.define_class(nil, "Class", nil :: any)
 
 type State = types.State
 type VM = types.VM
@@ -40,7 +36,7 @@ class.define_method(Class, "attached_object", function(state: State, argc: numbe
     assert(cls.type == "class")
 
     if not cls.value.is_singleton then
-        err.raise(state.vm, error_class.TypeError, `'{cls.value.name}' is not a singleton class`)
+        exception.raise(state.vm, exception.TypeError, `'{cls.value.name}' is not a singleton class`)
         return
     end
 
@@ -55,7 +51,7 @@ class.define_method(Class, "subclasses", function(state: State, argc: number)
     assert(self.type == "class")
 
     local cls = self.value
-    local new_arr_val = class.instance_new(array_class)
+    local new_arr_val = class.instance_new(class.builtins.Array)
     local new_arr = new_arr_val.value :: Array
 
     for _, v in ipairs(cls) do

@@ -10,6 +10,7 @@ export type State = {
     vm: VM,
     current_self_idx: number
 }
+
 export type LuaMethod = (state: State, argc: number) -> ()
 
 export type Method = { 
@@ -21,8 +22,6 @@ export type Method = {
     type: "luafunc", 
     value: LuaMethod 
 }
-
-export type Instance = unknown
 
 export type Class = Object & {
     name: string,
@@ -44,6 +43,7 @@ export type Object = {
     class: Class
 }
 
+
 export type String = Object & {
     str: string
 }
@@ -61,7 +61,7 @@ export type Range = Object & {
     }
 )
 
-export type Integer = Object & {
+export type Integer =  Object & {
     number: number
 }
 
@@ -71,7 +71,7 @@ export type Array = Object & {
     array: { Value }
 }
 
-type HashKey = string | boolean | number | Value
+type HashKey = Value
 export type Hash = Object & {
     hash: { [HashKey]: Value }
 }
@@ -90,7 +90,7 @@ export type Symbol = Object & {
 
 export type TrueClass = Object
 export type FalseClass = Object
-export type NilClass = Object 
+export type NilClass = Object
 --end
 
 --types vm.luau
@@ -134,11 +134,11 @@ type VMEnsure = {
 }
 
 export type VM = {
-    id: number,
     should_stop: boolean,
-    permanence: boolean,
     top_irep: IREP,
-    inst: ByteStream, -- pointer to instruction in binary stream
+    pc: number,
+    inst: string,
+    ext: number,
     registers: { Value },
     exception: Value,
     debug_mode: boolean,
@@ -162,52 +162,80 @@ export type VM = {
 --end
 
 --type value.luau
-export type Value = {
+export type IntegerValue = {
     type: "integer",
     value: Integer
-} | {
+}
+
+export type FloatValue = {
     type: "float",
     value: Float
-} | {
+} 
+
+export type SymbolValue = {
     type: "symbol",
     value: Symbol
-} | {
+} 
+
+export type TrueValue ={
     type: "true",
     value: TrueClass
-} | {
+}
+
+export type FalseValue = {
     type: "false",
     value: FalseClass
-} | {
+}
+
+export type NilValue = {
     type: "nil",
     value: NilClass
-} | {
+}
+
+export type ObjectValue = {
     type: "object",
     value: Object
-} | {
+}
+
+export type ClassValue = {
     type: "class",
     value: Class
-} | {
+} 
+
+export type ProcValue = {
     type: "proc",
     value: Proc
-} | {
+}
+
+export type ArrayValue = {
     type: "array",
     value: Array
-} | {
+}
+
+export type StringValue = {
     type: "string",
     value: String
-} | {
+}
+
+export type RangeValue = {
     type: "range",
-    value: any
-} |  {
+    value: Range
+}
+
+export type HashValue = {
     type: "hash",
     value: Hash
-} | {
+}
+
+export type ExceptionValue = {
     type: "exception",
     value: Exception
-} | {
-    type: "empty",
-    value: unknown
 }
+
+export type Value = 
+    IntegerValue | FloatValue | SymbolValue | TrueValue 
+    | FalseValue | NilValue | ObjectValue | ClassValue
+    | ProcValue | ArrayValue | StringValue | RangeValue | HashValue | ExceptionValue
 --end
 
 --type keyvalue.luau

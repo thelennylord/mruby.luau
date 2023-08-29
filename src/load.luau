@@ -180,7 +180,7 @@ local function read_syms(reader: ByteStream, length: number): { number }
     return syms
 end
 
-local function read_irep(reader: ByteStream): IREP
+local function read_irep(reader: ByteStream, debug: boolean): IREP
     -- Skip record size
     reader:skip(4)
 
@@ -195,7 +195,12 @@ local function read_irep(reader: ByteStream): IREP
     local num_instructions = reader:read_byte(4)
     irep.num_instructions = num_instructions
     irep.inst_idx = reader.cursor
-    irep.debug_instructions = read_instructions(reader, num_instructions)
+
+    if debug then
+        irep.debug_instructions = read_instructions(reader, num_instructions)
+    else
+        reader:skip(num_instructions)
+    end
 
     irep.catch_handlers = read_catch_handlers(reader, num_catch_handler)
     
@@ -207,16 +212,16 @@ local function read_irep(reader: ByteStream): IREP
 
     irep.children = {}
     for _ = 1, num_child_ireps do
-        table.insert(irep.children, read_irep(reader))
+        table.insert(irep.children, read_irep(reader, debug))
     end
 
     return irep
 end
 
-local function load_bytecode(reader: ByteStream): IREP
+local function load_bytecode(reader: ByteStream, debug: boolean): IREP
     read_binary_header(reader)
     
-    return read_irep(reader)
+    return read_irep(reader, debug)
 end
 
 return {

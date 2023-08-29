@@ -6,23 +6,24 @@ local symbol = require("symbol")
 local global = require("global")
 local class = require("class")
 local keyvalue = require("keyvalue")
-local err = require("error")
+local exception = require("exception")
 
-local _basicobject_class = require("builtins/basicobject")
-local object_class = require("builtins/object")
-local array_class = require("builtins/array")
-local error_class = require("builtins/errors")
-local string_class = require("builtins/string")
-local proc_class = require("builtins/proc")
-local hash_class = require("builtins/hash")
-local _class_class = require("builtins/class")
-local _symbol_class = require("builtins/symbol")
-local _integer_class = require("builtins/integer")
-local _float_class = require("builtins/float")
-local _nilclass_class = require("builtins/nilclass")
-local _trueclass_class = require("builtins/trueclass")
-local _falseclass_class = require("builtins/falseclass")
-local module_class = require("builtins/module")
+-- Require definitions of the built-in classes
+require("builtins/basicobject")
+require("builtins/object")
+require("builtins/array")
+require("builtins/exception")
+require("builtins/string")
+require("builtins/proc")
+require("builtins/hash")
+require("builtins/class")
+require("builtins/symbol")
+require("builtins/integer")
+require("builtins/float")
+require("builtins/nilclass")
+require("builtins/trueclass")
+require("builtins/falseclass")
+require("builtins/module")
 
 type VM = types.VM
 type IREP = types.IREP
@@ -36,27 +37,15 @@ type Exception = types.Exception
 type Class = types.Class
 type CatchHandler = types.CatchHandler
 type ByteStream = types.ByteStream
+type HashValue = types.HashValue
 
-local function free_idx(tbl: { any }): number
-    for i = 1, #tbl do
-        if tbl[i] == nil then
-            return i
-        end
-    end
+--[[
+    Helper functions
 
-    return #tbl + 1
-end
-
-local function signed_int16(num: number): number
-    if num >= 2^15 then
-        return num - 2^16
-    end
-
-    return num
-end
-
+    They have been defined in this file so the Luau compiler can inline them
+]]
 local function proc_new(vm: VM, irep: IREP, proc_type: "block" | "lambda" | "method"): Proc
-    local val = class.instance_new(proc_class)
+    local val = class.instance_new(class.builtins.Proc)
     local proc = val.value :: Proc
     proc.type = proc_type
     proc.irep = irep
@@ -71,7 +60,76 @@ local function proc_new(vm: VM, irep: IREP, proc_type: "block" | "lambda" | "met
     return proc
 end
 
-local vm_map = {}
+local function fetch_Z(vm: VM)
+    vm.pc += 1
+end
+
+local function fetch_BB(vm: VM): (number, number)
+    local A, B, updated_pos = 
+        string.unpack(`>I{if bit32.btest(vm.ext, 0x01) then 2 else 1}I{if bit32.btest(vm.ext, 0x02) then 2 else 1}`, vm.inst, vm.pc + 1)
+
+    vm.pc = updated_pos
+
+    return A, B
+end
+
+local function fetch_B(vm: VM): number
+    local A, updated_pos = 
+        string.unpack(if bit32.btest(vm.ext, 0x01) then ">H" else ">B", vm.inst, vm.pc + 1)
+
+    vm.pc = updated_pos
+
+    return A
+end
+
+local function fetch_BBB(vm: VM): (number, number, number)
+    local A, B, C, updated_pos = 
+        string.unpack(`>I{if bit32.btest(vm.ext, 0x01) then 2 else 1}I{if bit32.btest(vm.ext, 0x02) then 2 else 1}B`, vm.inst, vm.pc + 1)
+
+    vm.pc = updated_pos
+
+    return A, B, C
+end
+
+local function fetch_BS(vm: VM): (number, number)
+    local A, B, updated_pos = 
+        string.unpack(`>{if bit32.btest(vm.ext, 0x01) then "H" else "B"}H`, vm.inst, vm.pc + 1)
+
+    vm.pc = updated_pos
+    return A, B
+end
+
+local function fetch_W(vm: VM): number
+    local A, updated_pos = string.unpack(">I3", vm.inst, vm.pc + 1)
+    vm.pc = updated_pos
+
+    return A
+end
+
+local function fetch_Bs(vm: VM): (number, number)
+    local A, B, updated_pos = 
+        string.unpack(`>{if bit32.btest(vm.ext, 0x01) then "H" else "B"}h`, vm.inst, vm.pc + 1)
+
+    vm.pc = updated_pos
+    return A, B
+end
+
+local function fetch_s(vm: VM): number
+    local A, updated_pos = 
+        string.unpack(`>h`, vm.inst, vm.pc + 1)
+
+    vm.pc = updated_pos
+    return A
+end
+
+local function fetch_Bi(vm: VM): (number, number)
+    local A, B, updated_pos = 
+        string.unpack(`>{if bit32.btest(vm.ext, 0x01) then "h" else "b"}i`, vm.inst, vm.pc + 1)
+
+    vm.pc = updated_pos
+
+    return A, B
+end
 
 -- VM Class
 local VM = {}
@@ -81,9 +139,8 @@ function VM.new(debug_mode: boolean?): VM
     debug_mode = if debug_mode == nil then false else debug_mode
 
     local self = {
-        id = -1,
+        ext = 0,
         debug_mode = debug_mode or false,
-        permanence = false,
         should_stop = false,
         ensure_state = {
             ensuring = false
@@ -96,26 +153,20 @@ function VM.new(debug_mode: boolean?): VM
     return setmetatable(self, VM) :: any
 end
 
-function VM.open(vm: VM)
-    local id = free_idx(vm_map)
-    vm_map[id] = vm
-
-    vm.id = id
-end
-
-function VM.load(vm: VM, stream: ByteStream, irep: IREP)
-    assert(stream ~= nil)
+function VM.load(vm: VM, inst: string, irep: IREP)
+    assert(inst ~= nil)
     assert(irep ~= nil)
 
-    vm.registers[1] = class.instance_new(object_class)
+    vm.registers[1] = class.instance_new(class.builtins.Object)
     vm.top_irep = irep
-    vm.inst = stream
-    
+    vm.inst = inst
+    vm.pc = irep.inst_idx
+
     vm.current_callinfo = {
         irep = irep,
         inst_cursor_pos = irep.inst_idx,
         self_reg_idx = 1,
-        target_class = object_class,
+        target_class = class.builtins.Object,
         self_class = nil,
         arg_count = 0,
         super_called = false,
@@ -123,12 +174,6 @@ function VM.load(vm: VM, stream: ByteStream, irep: IREP)
         deleted_kargs = {},
         dead = false
     }
-    
-    stream.cursor = irep.inst_idx
-end
-
-function VM.close(vm: VM)
-    vm_map[vm.id] = nil
 end
 
 function VM.get_self(vm: VM): Value
@@ -152,7 +197,7 @@ function VM.get_catch_handler(vm: VM, handler_type: string?): CatchHandler?
         return nil
     end
     
-    local inst_rel = vm.inst.cursor - vm.current_callinfo.irep.inst_idx
+    local inst_rel = vm.pc - vm.current_callinfo.irep.inst_idx
     for _, handler in vm.current_callinfo.irep.catch_handlers do
         if handler.type == handler_type 
         and handler.beginning < inst_rel
@@ -177,8 +222,8 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
 
     local current_self_idx = vm.current_callinfo.self_reg_idx
     local num_args = bit32.band(C, 0x0f)
-    local num_kwargs = bit32.band(bit32.rshift(C, 4), 0x0f)
-    local block_given = bit32.rshift(C, 8) ~= 0
+    local num_kwargs = bit32.extract(C, 4, 4)
+    local block_given = bit32.btest(C, 0x100)
 
     local args = {}
 
@@ -202,17 +247,17 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
     local kw_start = if num_args == CALL_MAXARGS then current_self_idx + A + 2 else current_self_idx + A + num_args + 1
     if num_kwargs > 0 then
         if num_kwargs ~= CALL_MAXARGS then
-            local hash_val = class.instance_new(hash_class)
-            local kw_hash = hash_val.value :: Hash
+            local hash_val: HashValue = class.instance_new(class.builtins.Hash)
+            local kw_hash = hash_val.value.hash
 
             for i = 0, num_kwargs * 2 - 1, 2 do
-                local key = vm.registers[kw_start + i]
+                local key = vm.registers[kw_start + i] :: types.SymbolValue
                 local val = vm.registers[kw_start + i + 1]
                 
                 vm.registers[kw_start + i] = nil
                 vm.registers[kw_start + i + 1] = nil
 
-                kw_hash.hash[value.autocast(key.value.sym_id, "symbol")] = val
+                kw_hash[value.autocast(key.value.sym_id, "symbol")] = val
             end
 
             table.insert(args, hash_val)
@@ -236,9 +281,9 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
     local method = if call_super then class.get_super_method(obj, sym_id) else class.get_method(obj, sym_id)
     if not method then
         if call_super then
-            err.raise(vm, error_class.NoMethodError, `no superclass method for {symbol.symid_to_str(sym_id)}`)
+            exception.raise(vm, exception.NoMethodError, `no superclass method for {symbol.symid_to_str(sym_id)}`)
         else
-            err.raise(vm, error_class.NoMethodError, `undefined local variable or method '{symbol.symid_to_str(sym_id)}' for {cls.name}`)
+            exception.raise(vm, exception.NoMethodError, `undefined local variable or method '{symbol.symid_to_str(sym_id)}' for {cls.name}`)
         end
         
         if #vm.callinfo_stack > 0 then
@@ -254,7 +299,7 @@ function VM.send_by_name(vm: VM, sym_id: number, A: number, C: number, call_supe
         local statefunc = {
             get_register = function(register: number): Value
                 assert(register >= 0)
-                return vm.registers[curr_idx + register]
+                return vm.registers[curr_idx + register] :: Value
             end,
 
             set_register = function(register: number, val: Value)
@@ -311,11 +356,11 @@ function VM.enter_callinfo(vm: VM, method_id: number?, irep: IREP, target_class:
     }
     
     -- Push current_callinfo to callinfo_stack
-    vm.current_callinfo.inst_cursor_pos = vm.inst.cursor
+    vm.current_callinfo.inst_cursor_pos = vm.pc
     table.insert(vm.callinfo_stack, vm.current_callinfo)
 
     vm.current_callinfo = callinfo
-    vm.inst.cursor = callinfo.inst_cursor_pos
+    vm.pc = callinfo.inst_cursor_pos
 
     return callinfo
 end
@@ -342,7 +387,7 @@ function VM.exit_callinfo(vm: VM)
     end
 
     vm.current_callinfo = prev_callinfo
-    vm.inst.cursor = prev_callinfo.inst_cursor_pos
+    vm.pc = prev_callinfo.inst_cursor_pos
 end
 
 function VM.get_register(vm: VM, register: number)
@@ -359,27 +404,26 @@ function VM.set_register(vm: VM, register: number, value: Value)
     vm.registers[vm.current_callinfo.self_reg_idx + register] = value
 end
 
-local execute = {}
-
-function execute.op_nop(vm: VM, ext: number)
-    -- blehhh :P
+-- Operands: Z
+local function op_nop(vm: VM)
+    fetch_Z(vm)
 end
 
 -- R[a] = R[b]
 -- Operands: BB
-function execute.op_move(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_move(vm: VM)
+    local A, B = fetch_BB(vm)
 
     vm:set_register(A, vm:get_register(B))
 end
 
 -- R[a] = Pool[b]
 -- Operands: BB
-function execute.op_loadl(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_loadl(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local pool_val = vm.current_callinfo.irep.pool[B + 1]
-    local val: Value= if type(pool_val) == "number" then
+    local val = if type(pool_val) == "number" then
         if math.floor(pool_val) == pool_val then
             value.autocast(vm.current_callinfo.irep.pool[B + 1], "integer")
         else
@@ -392,113 +436,112 @@ end
 
 -- R[a] = mrb_int(b)
 -- Operands: BB
-function execute.op_loadi(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_loadi(vm: VM)
+    local A, B = fetch_BB(vm)
 
     vm:set_register(A, value.autocast(B, "integer"))
 end
 
 -- R[a] = mrb_int(-b)
 -- Operands: BB
-function execute.op_loadineg(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_loadineg(vm: VM)
+    local A, B = fetch_BB(vm)
 
     vm:set_register(A, value.autocast(-B, "integer"))
 end
 
 -- R[a] = mrb_int(-1)
 -- Operands: B
-function execute.op_loadi__1(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi__1(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(-1, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_0(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_0(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(0, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_1(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_1(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(1, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_2(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_2(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(2, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_3(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_3(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(3, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_4(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_4(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(4, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_5(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_5(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(5, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_6(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_6(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(6, "integer"))
 end
 
 -- R[a] = mrb_int(n)
 -- Operands: B
-function execute.op_loadi_7(vm: VM, ext: number, n: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadi_7(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(7, "integer"))
 end
 
 -- R[a] = mrb_int16(b)
--- Operands: BS
-function execute.op_loadi16(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BS(vm.inst, ext)
+-- Operands: Bs
+local function op_loadi16(vm: VM)
+    local A, B = fetch_Bs(vm)
 
     vm:set_register(A, value.autocast(B, "integer"))
 end
 
 -- R[a] = mrb_int32( (b << 16) + c )
--- Operands: BSS
-function execute.op_loadi32(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BSS(vm.inst, ext)
+-- Operands: Bi
+local function op_loadi32(vm: VM)
+    local A, B = fetch_Bi(vm)
 
-    local num = bit32.lshift(B, 16) + C
-    vm:set_register(A, value.autocast(num, "integer"))
+    vm:set_register(A, value.autocast(B, "integer"))
 end
 
 -- R[a] = Syms[b]
 -- Operands: BB
-function execute.op_loadsym(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_loadsym(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     vm:set_register(A, value.autocast(sym_id, "symbol"))
@@ -506,40 +549,40 @@ end
 
 -- R[a] = nil
 -- Operands: B
-function execute.op_loadnil(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadnil(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(nil))
 end
 
 -- R[a] = self
 -- Operands: B
-function execute.op_loadself(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadself(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, vm:get_self())
 end
 
 -- R[a] = true
 -- Operands: B
-function execute.op_loadt(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadt(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(true))
 end
 
 -- R[a] = false
 -- Operands: B
-function execute.op_loadf(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_loadf(vm: VM)
+    local A = fetch_B(vm)
 
     vm:set_register(A, value.autocast(false))
 end
 
 -- R[a] = getglobal(Syms[b])
 -- Operands: BB
-function execute.op_getgv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_getgv(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local val = global.globals.get(sym_id)
@@ -552,8 +595,8 @@ end
 
 -- setglobal(Syms[b], R[a])
 -- Operands: BB
-function execute.op_setgv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_setgv(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     global.globals.set(sym_id, vm:get_register(A))
@@ -561,22 +604,22 @@ end
 
 -- R[a] = Special[Syms[b]]
 -- Operands: BB
-function execute.op_getsv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_getsv(vm: VM)
+    local A, B = fetch_BB(vm)
     error("not implemented")
 end
 
 -- Special[Syms[b]] = R[a]
 -- Operands: BB
-function execute.op_setsv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_setsv(vm: VM)
+    local A, B = fetch_BB(vm)
     error("not implemented")
 end
 
 -- R[a] = ivget(Syms[b])
 -- Operands: BB
-function execute.op_getiv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_getiv(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
@@ -586,8 +629,8 @@ end
 
 -- ivset(Syms[b], R[a])
 -- Operands: BB
-function execute.op_setiv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_setiv(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
@@ -597,8 +640,8 @@ end
 
 -- R[a] = cvget(Syms[b])
 -- Operands: BB
-function execute.op_getcv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_getcv(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
@@ -609,8 +652,8 @@ end
 
 -- cvset(Syms[b], R[a])
 -- Operands: BB
-function execute.op_setcv(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_setcv(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     local self = vm:get_self()
@@ -620,8 +663,8 @@ end
 
 -- R[a] = constget(Syms[b])
 -- Operands: BB
-function execute.op_getconst(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_getconst(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     
@@ -632,7 +675,7 @@ function execute.op_getconst(vm: VM, ext: number)
     
     local val = global.consts.get_class_const(cls, sym_id) or global.consts.get(sym_id)
     if val == nil then
-        err.raise(vm, error_class.NameError, `uninitialized constant {symbol.symid_to_str(sym_id)}`)
+        exception.raise(vm, exception.NameError, `uninitialized constant {symbol.symid_to_str(sym_id)}`)
         return
     end
 
@@ -641,8 +684,8 @@ end
 
 -- constset(Syms[b], R[a])
 -- Operands: BB
-function execute.op_setconst(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_setconst(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local value = vm:get_register(A)
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
@@ -657,13 +700,13 @@ end
 
 -- R[a] = R[a]::Syms[b]
 -- Operands: BB
-function execute.op_getmcnst(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_getmcnst(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local val = vm:get_register(A)
     if val.type ~= "class" then
         -- TODO use val.to_s
-        err.raise(vm, error_class.TypeError, `object is not a class/module`)
+        exception.raise(vm, exception.TypeError, `object is not a class/module`)
         return
     end
 
@@ -671,7 +714,7 @@ function execute.op_getmcnst(vm: VM, ext: number)
 
     local obj = global.consts.get_class_const(val.value, sym_id)
     if obj == nil then
-        err.raise(vm, error_class.NameError, `uninitialized constant {symbol.symid_to_str(val.value.sym_id)}::{symbol.symid_to_str(sym_id)}`)
+        exception.raise(vm, exception.NameError, `uninitialized constant {symbol.symid_to_str(val.value.sym_id)}::{symbol.symid_to_str(sym_id)}`)
         return
     end
 
@@ -680,15 +723,15 @@ end
 
 -- R[a+1]::Syms[b] = R[a]
 -- Operands: BB
-function execute.op_setmcnst(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_setmcnst(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local val1 = vm:get_register(A)
     
     local val2 = vm:get_register(A + 1)
     if val2.type ~= "class" then
         -- TODO use val1.to_s
-        err.raise(vm, error_class.TypeError, `object is not a class/module`)
+        exception.raise(vm, exception.TypeError, `object is not a class/module`)
         return
     end
 
@@ -698,8 +741,8 @@ end
 
 -- R[a] = uvget(b,c)
 -- Operands: BBB
-function execute.op_getupvar(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_getupvar(vm: VM)
+    local A, B, C = fetch_BBB(vm)
     
     local proc = vm:get_register(0)
     assert(proc.type == "proc")
@@ -713,8 +756,8 @@ end
 
 -- uvset(b,c,R[a])
 -- Operands: BBB
-function execute.op_setupvar(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_setupvar(vm: VM)
+    local A, B, C = fetch_BBB(vm)
     
     local proc = vm:get_register(0)
     assert(proc.type == "proc")
@@ -727,79 +770,79 @@ end
 
 -- R[a] = R[a][R[a+1]]
 -- Operands: B
-function execute.op_getidx(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_getidx(vm: VM)
+    local A = fetch_B(vm)
 
     vm:send_by_name(symbol.str_to_symid("[]"), A, 1)
 end
 
 -- R[a][R[a+1]] = R[a+2]
 -- Operands: B
-function execute.op_setidx(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_setidx(vm: VM)
+    local A = fetch_B(vm)
     vm:send_by_name(symbol.str_to_symid("[]="), A, 2)
 end
 
 -- pc += a
--- Operands: S
-function execute.op_jmp(vm: VM, ext: number)
-    local A = opcodes.fetch_S(vm.inst, ext)
-    vm.inst:skip(signed_int16(A))
+-- Operands: s
+local function op_jmp(vm: VM)
+    local A = fetch_s(vm)
+    vm.pc += A
 end
 
 -- if R[a] pc+=b
--- Operands: BS
-function execute.op_jmpif(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BS(vm.inst, ext)
+-- Operands: Bs
+local function op_jmpif(vm: VM)
+    local A, B = fetch_Bs(vm)
 
     local val = vm:get_register(A)
     if val.type ~= "false" then
-        vm.inst:skip(signed_int16(B))
+        vm.pc += B
     end
 end
 
 -- if !R[a] pc+=b
--- Operands: BS
-function execute.op_jmpnot(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BS(vm.inst, ext)
+-- Operands: Bs
+local function op_jmpnot(vm: VM)
+    local A, B = fetch_Bs(vm)
 
     local val = vm:get_register(A)
     if val.type == "false" or val.type == "nil" then
-        vm.inst:skip(signed_int16(B))
+        vm.pc += B
     end
 end
 
 -- if R[a] == nil pc+=b
--- Operands: BS
-function execute.op_jmpnil(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BS(vm.inst, ext)
+-- Operands: Bs
+local function op_jmpnil(vm: VM)
+    local A, B = fetch_Bs(vm)
 
     local val = vm:get_register(A)
     if val.type == "nil" then
-        vm.inst:skip(signed_int16(B))
+        vm.pc += B
     end
 end
 
 -- unwind_and_jump_to(a)
--- Operands: S
-function execute.op_jmpuw(vm: VM, ext: number)
-    local A = opcodes.fetch_S(vm.inst, ext)
+-- Operands: s
+local function op_jmpuw(vm: VM)
+    local A = fetch_s(vm)
 
-    local jump_inst_idx = vm.inst.cursor + signed_int16(A)
+    local jump_inst_idx = vm.pc + A
 
     local handler = vm:get_catch_handler("ensure")
     if not handler then
-        vm.inst.cursor = jump_inst_idx
+        vm.pc = jump_inst_idx
         return
     end
 
-    vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+    vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
 end
 
 -- R[a] = exc
 -- Operands: B
-function execute.op_except(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_except(vm: VM)
+    local A = fetch_B(vm)
     
     vm:set_register(A, vm.exception)
     vm.exception = value.autocast(nil)
@@ -807,8 +850,8 @@ end
 
 -- R[b] = R[a].is_a?(R[b])
 -- Operands: BB
-function execute.op_rescue(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_rescue(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local val1 = vm:get_register(A)
     local val2 = vm:get_register(B)
@@ -822,8 +865,8 @@ end
 
 -- raise(R[a]) if R[a]
 -- Operands: B
-function execute.op_raiseif(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_raiseif(vm: VM)
+    local A = fetch_B(vm)
     
     local val = vm:get_register(A)
     if val.type == "nil" then
@@ -836,8 +879,8 @@ end
 
 -- R[a] = self.send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..) (c=n|k<<4)
 -- Operands: BBB
-function execute.op_ssend(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_ssend(vm: VM)
+    local A, B, C = fetch_BBB(vm)
 
     vm:set_register(A, vm:get_self())
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
@@ -847,8 +890,8 @@ end
 
 -- R[a] = self.send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..,&R[a+n+2k+1])
 -- Operands: BBB
-function execute.op_ssendb(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_ssendb(vm: VM)
+    local A, B, C = fetch_BBB(vm)
 
     vm:set_register(A, vm:get_self())
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
@@ -858,8 +901,8 @@ end
 
 -- R[a] = R[a].send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..) (c=n|k<<4)
 -- Operands: BBB
-function execute.op_send(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_send(vm: VM)
+    local A, B, C = fetch_BBB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     vm:send_by_name(sym_id, A, C)
@@ -867,8 +910,8 @@ end
 
 -- R[a] = R[a].send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..,&R[a+n+2k+1])
 -- Operands: BBB
-function execute.op_sendb(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_sendb(vm: VM)
+    local A, B, C = fetch_BBB(vm)
 
     local sym_id = vm.current_callinfo.irep.syms[B + 1]
     vm:send_by_name(sym_id, A, bit32.bor(C, 0x100))
@@ -876,18 +919,19 @@ end
 
 -- R[0] = self.call(frame.argc, frame.argv)
 -- Operands: Z
-function execute.op_call(vm: VM, ext: number)
+local function op_call(vm: VM)
+    fetch_Z(vm)
     error("not implemented")
 end
 
 -- R[a] = super(R[a+1],... ,R[a+b+1])
 -- Operands: BB
-function execute.op_super(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_super(vm: VM)
+    local A, B = fetch_BB(vm)
     
     local callinfo = vm.current_callinfo
     if callinfo == nil or callinfo.target_class == nil or callinfo.method_id == nil then
-        err.raise(vm, error_class.NoMethodError, "super called outside of method")
+        exception.raise(vm, exception.NoMethodError, "super called outside of method")
         return
     end
 
@@ -898,16 +942,16 @@ end
 
 -- R[a] = argument array (16=m5:r1:m5:d1:lv4)
 -- Operands: BS
-function execute.op_argary(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BS(vm.inst, ext)
-    local m1_count = bit32.rshift(B, 11)
-    local should_rest = bit32.band(bit32.rshift(B, 10), 0x01) ~= 0
-    local m2_count = bit32.band(bit32.rshift(B, 5), 0x1f)
-    local dict = bit32.band(bit32.rshift(B, 4), 0x01) ~= 0
-    local lv = bit32.band(B, 4)
+local function op_argary(vm: VM)
+    local A, B = fetch_BS(vm)
+    local m1_count = bit32.extract(B, 11, 5)
+    local should_rest = bit32.btest(B, 0x400)
+    local m2_count = bit32.extract(B, 5, 5)
+    local dict = bit32.btest(B, 0x10)
+    local lv = bit32.band(B, 0x0f)
 
     if vm.current_callinfo.method_id == nil then
-        err.raise(vm, error_class.NoMethodError, `super called outside of method`)
+        exception.raise(vm, exception.NoMethodError, `super called outside of method`)
         return
     end
 
@@ -917,7 +961,7 @@ function execute.op_argary(vm: VM, ext: number)
         vm.callinfo_stack[#vm.callinfo_stack - lv - 1].self_reg_idx + 1
 
     -- Move all values of m1, *args and m2 arguments into a single array
-    local ary_val = class.instance_new(array_class)
+    local ary_val = class.instance_new(class.builtins.Array)
     local new_ary = ary_val.value :: Array
     table.move(vm.registers, reg_idx, reg_idx + m1_count - 1, 1, new_ary.array)
 
@@ -943,7 +987,7 @@ function execute.op_argary(vm: VM, ext: number)
         assert(hash.type == "hash", `expected Hash but got {hash.type}`)
 
         -- Duplicate the kwarg hash along with deleted OP_KARG keys
-        local dup_hash = class.instance_new(hash_class)
+        local dup_hash = class.instance_new(class.builtins.Hash)
         for k, v in pairs(hash.value.hash) do
             (dup_hash.value :: Hash).hash[k] = v
         end
@@ -963,13 +1007,13 @@ end
 
 -- arg setup according to flags (23=m5:o5:r1:m5:k5:d1:b1)
 -- Operands: W
-function execute.op_enter(vm: VM, ext: number)
-    local A = opcodes.fetch_W(vm.inst, ext)
-    local m1_count = bit32.rshift(A, 18)
-    local optional_count = bit32.extract(bit32.rshift(A, 13), 0x1f)
+local function op_enter(vm: VM)
+    local A = fetch_W(vm)
+    local m1_count = bit32.extract(A, 18, 5)
+    local optional_count = bit32.extract(A, 13, 5)
     local should_rest = bit32.btest(A, 0x1000)
-    local m2_count = bit32.band(bit32.rshift(A, 7), 0x1f)
-    local kwargs_count = bit32.band(bit32.rshift(A, 2), 0x1f)
+    local m2_count = bit32.extract(A, 7, 5)
+    local kwargs_count = bit32.extract(A, 2, 5)
     local should_dict = bit32.btest(A, 0x02)
     local check_block = bit32.btest(A, 0x01)
 
@@ -980,7 +1024,7 @@ function execute.op_enter(vm: VM, ext: number)
 
     if args_given < m1_count then
         -- TODO make it better
-        err.raise(vm, error_class.ArgumentError, `wrong number of arguments (given {args_given}, expected {m1_count}+)`)
+        exception.raise(vm, exception.ArgumentError, `wrong number of arguments (given {args_given}, expected {m1_count}+)`)
         return
     end
 
@@ -993,7 +1037,7 @@ function execute.op_enter(vm: VM, ext: number)
     if should_rest then
         -- Collect remaining values and put them in an array,
         -- until we reach a Hash, Proc or NilClass
-        local new_arr_val = class.instance_new(array_class)
+        local new_arr_val = class.instance_new(class.builtins.Array)
         local new_arr = new_arr_val.value :: Array
 
         do
@@ -1053,20 +1097,20 @@ function execute.op_enter(vm: VM, ext: number)
             jump_offset = optional_count
             
             -- TODO understand this
-            if not should_rest and (vm:get_register(0).type ~= "proc" or vm:get_register(0).value.type ~= "block") then
-                err.raise(vm, error_class.ArgumentError, `wrong number of arguments`)
+            if not should_rest and (vm:get_register(0).type ~= "proc" or (vm:get_register(0).value :: Proc).type ~= "block") then
+                exception.raise(vm, exception.ArgumentError, `wrong number of arguments`)
                 return
             end
         end
 
-        vm.inst:skip(jump_offset * 3)
+        vm.pc += jump_offset * 3
     end
 end
 
 -- R[a] = kdict.key?(Syms[b])
 -- Operands: BB
-function execute.op_key_p(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_key_p(vm: VM)
+    local A, B = fetch_BB(vm)
     
     assert(#vm.callinfo_stack > 0)
 
@@ -1087,7 +1131,8 @@ end
 
 -- raise unless kdict.empty?
 -- Operands: Z
-function execute.op_keyend(vm: VM, ext: number)
+local function op_keyend(vm: VM)
+    fetch_Z(vm)
     assert(#vm.callinfo_stack > 0)
 
     local kdict = vm:get_register(vm.current_callinfo.arg_count)
@@ -1095,14 +1140,14 @@ function execute.op_keyend(vm: VM, ext: number)
 
     if #kdict.value.hash > 0 then
         -- TODO I'll probably have to change how hash is implemented lol
-        err.raise(vm, error_class.ArgumentError, `unknown keyword: ???`)
+        exception.raise(vm, exception.ArgumentError, `unknown keyword: ???`)
     end
 end
 
 -- R[a] = kdict[Syms[b]]; kdict.delete(Syms[b])
 -- Operands: BB
-function execute.op_karg(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_karg(vm: VM)
+    local A, B = fetch_BB(vm)
 
     assert(#vm.callinfo_stack > 0)
 
@@ -1114,7 +1159,7 @@ function execute.op_karg(vm: VM, ext: number)
     local ret = kdict.value.hash[sym]
 
     if ret == nil then
-        err.raise(vm, error_class.ArgumentError, `missing keyword: {symbol.symid_to_str(sym_id)}`)
+        exception.raise(vm, exception.ArgumentError, `missing keyword: {symbol.symid_to_str(sym_id)}`)
         return
     end
 
@@ -1126,14 +1171,14 @@ end
 
 -- return R[a] (normal)
 -- Operands: B
-function execute.op_return(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_return(vm: VM)
+    local A = fetch_B(vm)
 
     -- Jump to ensure if exists
     do
         local handler = vm:get_catch_handler("ensure")
         if handler then
-            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+            vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
             return
         end
     end
@@ -1149,14 +1194,14 @@ function execute.op_return(vm: VM, ext: number)
     if vm.ensure_state.ensuring then
         -- Handle different cases for an explicit and implicit return in an ensure block
         -- The last instruction of a callinfo (aka OP_RETURN) is an implicit return
-        if vm.inst.cursor == callinfo.irep.num_instructions then
+        if vm.pc == callinfo.irep.num_instructions then
             -- Implicit return
             while vm.ensure_state.target_callinfo ~= vm.current_callinfo do
                 vm:exit_callinfo()
                 
                 local handler = vm:get_catch_handler("ensure")
                 if handler then
-                    vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+                    vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
                     return
                 end
             end
@@ -1182,8 +1227,8 @@ end
 
 -- return R[a] (in-block return)
 -- Operands: B
-function execute.op_return_blk(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_return_blk(vm: VM)
+    local A = fetch_B(vm)
     local ret = vm:get_register(A)
     
     local self = vm:get_register(0)
@@ -1202,7 +1247,7 @@ function execute.op_return_blk(vm: VM, ext: number)
 
     if proc.embracing_callinfo.dead then
         -- TODO Make the error message more clear
-        err.raise(vm, error_class.LocalJumpError, `unexpected return`)
+        exception.raise(vm, exception.LocalJumpError, `unexpected return`)
         return
     end
 
@@ -1211,7 +1256,7 @@ function execute.op_return_blk(vm: VM, ext: number)
         -- Be sure to jump to ensures
         local handler = vm:get_catch_handler("ensure")
         if handler then
-            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+            vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
 
             -- Enable the ensure state so the return value can carry forward
             vm.ensure_state.ensuring = true
@@ -1229,14 +1274,14 @@ end
 
 -- break R[a]
 -- Operands: B
-function execute.op_break(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_break(vm: VM)
+    local A = fetch_B(vm)
     local ret = vm:get_register(A)
 
     local self = vm:get_register(0)
     if self.type ~= "proc" then
         -- TODO verify
-        err.raise(vm, error_class.LocalJumpError, "unexpected break")
+        exception.raise(vm, exception.LocalJumpError, "unexpected break")
         return
     end
 
@@ -1244,7 +1289,7 @@ function execute.op_break(vm: VM, ext: number)
     assert(proc.caller_callinfo ~= nil)
 
     if proc.type ~= "lambda" and proc.caller_callinfo.dead then
-        err.raise(vm, error_class.LocalJumpError, `break from proc-closure`)
+        exception.raise(vm, exception.LocalJumpError, `break from proc-closure`)
         return
     end
 
@@ -1261,7 +1306,7 @@ function execute.op_break(vm: VM, ext: number)
     local handler = vm:get_catch_handler("ensure")
     if proc.type == "lambda" then
         if handler then
-            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+            vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
         else
             vm:set_register(0, ret)
             vm:exit_callinfo()
@@ -1274,7 +1319,7 @@ function execute.op_break(vm: VM, ext: number)
     while proc.caller_callinfo ~= vm.current_callinfo do
         handler = vm:get_catch_handler("ensure")
         if handler then
-            vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+            vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
 
             -- Enable the ensure state so the return value can carry forward
             vm.ensure_state.ensuring = true
@@ -1292,14 +1337,14 @@ end
 
 -- R[a] = block (16=m5:r1:m5:d1:lv4)
 -- Operands: BS
-function execute.op_blkpush(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BS(vm.inst, ext)
+local function op_blkpush(vm: VM)
+    local A, B = fetch_BS(vm)
 
-    local m1_count = bit32.band(bit32.rshift(B, 11), 0x3f)
-    local rest = bit32.band(bit32.rshift(B, 10), 0x01)
-    local m2_count = bit32.band(bit32.rshift(B, 5), 0x1f)
-    local kd = bit32.band(bit32.rshift(B, 4), 0x01)
-    local lv = bit32.band(B, 0x0f)
+    local m1_count = bit32.extract(B, 11, 5)
+    local rest = bit32.extract(B, 10)
+    local m2_count = bit32.extract(B, 5, 5)
+    local kd = bit32.extract(B, 4)
+    local lv = bit32.extract(B, 0, 4)
 
     local offset = m1_count + rest + m2_count + kd + 1
 
@@ -1309,7 +1354,7 @@ function execute.op_blkpush(vm: VM, ext: number)
     else
         local proc = vm:get_register(0)
         if proc.type ~= "proc" or proc.value.embracing_callinfo == nil or proc.value.embracing_callinfo.irep.num_regs <= offset then
-            err.raise(vm, error_class.LocalJumpError, `unexpected yield`)
+            exception.raise(vm, exception.LocalJumpError, `unexpected yield`)
             return
         end
 
@@ -1318,7 +1363,7 @@ function execute.op_blkpush(vm: VM, ext: number)
     end
 
     if block.type ~= "proc" then
-        err.raise(vm, error_class.LocalJumpError, `unexpected yield`)
+        exception.raise(vm, exception.LocalJumpError, `unexpected yield`)
         return
     end
 
@@ -1327,8 +1372,8 @@ end
 
 -- R[a] = R[a] + R[a+1]
 -- Operands: B
-function execute.op_add(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_add(vm: VM)
+    local A = fetch_B(vm)
     
     local val1 = vm:get_register(A)
     local val2 = vm:get_register(A + 1)
@@ -1353,8 +1398,8 @@ end
 
 -- R[a] = R[a] + mrb_int(b)
 -- Operands: BB
-function execute.op_addi(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_addi(vm: VM)
+    local A, B = fetch_BB(vm)
     
     local val1 = vm:get_register(A)
 
@@ -1364,13 +1409,13 @@ function execute.op_addi(vm: VM, ext: number)
     end
 
     local value_type = if val1.type == "object" then val1.value.class.name else val1.type:gsub("^%l", string.upper)
-    err.raise(vm, error_class.TypeError, `no implicit conversion of {value_type} to Integer`)
+    exception.raise(vm, exception.TypeError, `no implicit conversion of {value_type} to Integer`)
 end
 
 -- R[a] = R[a] - R[a+1]
 -- Operands: B
-function execute.op_sub(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_sub(vm: VM)
+    local A = fetch_B(vm)
     
     local val1 = vm:get_register(A)
     local val2 = vm:get_register(A + 1)
@@ -1395,8 +1440,8 @@ end
 
 -- R[a] = R[a] - mrb_int(b)
 -- Operands: BB
-function execute.op_subi(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_subi(vm: VM)
+    local A, B = fetch_BB(vm)
     
     local val1 = vm:get_register(A)
 
@@ -1406,13 +1451,13 @@ function execute.op_subi(vm: VM, ext: number)
     end
 
     local value_type = if val1.type == "object" then val1.value.class.name else val1.type:gsub("^%l", string.upper)
-    err.raise(vm, error_class.TypeError, `no implicit conversion of {value_type} to Integer`)
+    exception.raise(vm, exception.TypeError, `no implicit conversion of {value_type} to Integer`)
 end
 
 -- R[a] = R[a] * R[a+1]
 -- Operands: B
-function execute.op_mul(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_mul(vm: VM)
+    local A = fetch_B(vm)
     
     local val1 = vm:get_register(A)
     local val2 = vm:get_register(A + 1)
@@ -1437,14 +1482,14 @@ end
 
 -- R[a] = R[a] / R[a+1]
 -- Operands: B
-function execute.op_div(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_div(vm: VM)
+    local A = fetch_B(vm)
     
     local val1 = vm:get_register(A)
     local val2 = vm:get_register(A + 1)
 
     if (val2.type == "integer" or val2.type == "float") and val2.value.number == 0 then
-        err.raise(vm, error_class.ZeroDivisionError, `divided by 0`)
+        exception.raise(vm, exception.ZeroDivisionError, `divided by 0`)
         return
     end
 
@@ -1468,8 +1513,8 @@ end
 
 -- R[a] = R[a] == R[a+1]
 -- Operands: B
-function execute.op_eq(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_eq(vm: VM)
+    local A = fetch_B(vm)
     local val1 = vm:get_register(A)
     
     if val1.type == "object" then
@@ -1483,8 +1528,8 @@ end
 
 -- R[a] = R[a] < R[a+1]
 -- Operands: B
-function execute.op_lt(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_lt(vm: VM)
+    local A = fetch_B(vm)
     local val1 = vm:get_register(A)
     
     if val1.type == "object" then
@@ -1498,8 +1543,8 @@ end
 
 -- R[a] = R[a] <= R[a+1]
 -- Operands: B
-function execute.op_le(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_le(vm: VM)
+    local A = fetch_B(vm)
     local val1 = vm:get_register(A)
     
     if val1.type == "object" then
@@ -1513,8 +1558,8 @@ end
 
 -- R[a] = R[a] > R[a+1]
 -- Operands: B
-function execute.op_gt(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_gt(vm: VM)
+    local A = fetch_B(vm)
     local val1 = vm:get_register(A)
     
     if val1.type == "object" then
@@ -1528,8 +1573,8 @@ end
 
 -- R[a] = R[a] >= R[a+1]
 -- Operands: B
-function execute.op_ge(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_ge(vm: VM)
+    local A = fetch_B(vm)
     local val1 = vm:get_register(A)
     
     if val1.type == "object" then
@@ -1543,10 +1588,10 @@ end
 
 -- R[a] = ary_new(R[a],R[a+1]..R[a+b])
 -- Operands: BB
-function execute.op_array(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_array(vm: VM)
+    local A, B = fetch_BB(vm)
 
-    local new_arr_val = class.instance_new(array_class)
+    local new_arr_val = class.instance_new(class.builtins.Array)
     local new_arr = new_arr_val.value :: Array
 
     for i = A, A + B do
@@ -1559,10 +1604,10 @@ end
 
 -- R[a] = ary_new(R[b],R[b+1]..R[b+c])
 -- Operands: BBB
-function execute.op_array2(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_array2(vm: VM)
+    local A, B, C = fetch_BBB(vm)
 
-    local new_arr_val = class.instance_new(array_class)
+    local new_arr_val = class.instance_new(class.builtins.Array)
     local new_arr = new_arr_val.value :: Array
 
     for i = B, B + C do
@@ -1575,8 +1620,8 @@ end
 
 -- ary_cat(R[a],R[a+1])
 -- Operands: B
-function execute.op_arycat(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_arycat(vm: VM)
+    local A = fetch_B(vm)
 
     local val1 = vm:get_register(A)
     assert(val1.type == "array")
@@ -1589,8 +1634,8 @@ end
 
 -- ary_push(R[a],R[a+1]..R[a+b])
 -- Operands: BB
-function execute.op_arypush(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_arypush(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local val1 = vm:get_register(A)
     assert(val1.type == "array")
@@ -1603,13 +1648,13 @@ end
 
 -- R[a] = ary_dup(R[a])
 -- Operands: B
-function execute.op_arydup(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_arydup(vm: VM)
+    local A = fetch_B(vm)
 
     local val1 = vm:get_register(A)
     assert(val1.type == "array")
 
-    local new_arr_val = class.instance_new(array_class)
+    local new_arr_val = class.instance_new(class.builtins.Array)
     local new_arr = new_arr_val.value :: Array
     new_arr.array = table.clone(val1.value.array)
 
@@ -1618,8 +1663,8 @@ end
 
 -- R[a] = R[b][c]
 -- Operands: BBB
-function execute.op_aref(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_aref(vm: VM)
+    local A, B, C = fetch_BBB(vm)
 
     local val1 = vm:get_register(B)
 
@@ -1639,8 +1684,8 @@ end
 
 -- R[b][c] = R[a]
 -- Operands: BBB
-function execute.op_aset(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_aset(vm: VM)
+    local A, B, C = fetch_BBB(vm)
 
     local val1 = vm:get_register(B)
     assert(val1.type == "array")
@@ -1650,36 +1695,35 @@ end
 
 -- *R[a],R[a+1]..R[a+c] = R[a][b..]
 -- Operands: BBB
-function execute.op_apost(vm: VM, ext: number)
+local function op_apost(vm: VM)
     -- TODO what does this opcode even do?
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+    local A, B, C = fetch_BBB(vm)
 
     local val1 = vm:get_register(A)
     if val1.type ~= "array" then
-        val1 = {
-            type = "array",
-            value = {
-                class = array_class,
-                ivar = keyvalue.new(),
-                array = table.clone(val1.value.array)
-            } :: Array
-        }
+        -- val1 = {
+        --     type = "array",
+        --     value = {
+        --         class = class.builtins.Array,
+        --         ivar = keyvalue.new(),
+        --         array = table.clone(val1.value.array)
+        --     } :: Array
+        -- }
     end
 
     local pre = B
     local post = C
-    
 
     assert(val1.type == "array") -- for the typechecker
     if #val1.value.array > pre + post then
         local ary_size = #val1.value.array - pre - post
-        table.move(val1.value.array, pre + 1, pre + ary_size, 1, vm:get_register(A).value.array)
+        table.move(val1.value.array, pre + 1, pre + ary_size, 1, (vm:get_register(A).value :: Array).array)
     
     else
         vm:set_register(A, {
             type = "array",
             value = {
-                class = array_class,
+                class = class.builtins.Array,
                 ivar = keyvalue.new(),
                 array = table.clone(val1.value.array)
             } :: Array
@@ -1690,8 +1734,8 @@ end
 
 -- R[a] = intern(R[a])
 -- Operands: B
-function execute.op_intern(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_intern(vm: VM)
+    local A = fetch_B(vm)
 
     local val = vm:get_register(A)
     assert(val.type == "string")
@@ -1702,8 +1746,8 @@ end
 
 -- R[a] = intern(Pool[b])
 -- Operands: BB
-function execute.op_symbol(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_symbol(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local sym_str = vm.current_callinfo.irep.pool[B + 1]
     assert(type(sym_str) == "string")
@@ -1714,13 +1758,13 @@ end
 
 -- R[a] = str_dup(Pool[b])
 -- Operands: BB
-function execute.op_string(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_string(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local str = vm.current_callinfo.irep.pool[B + 1]
     assert(type(str) == "string")
 
-    local new_str_val = class.instance_new(string_class)
+    local new_str_val = class.instance_new(class.builtins.String)
     local new_str = new_str_val.value :: String
     new_str.str = str
 
@@ -1729,8 +1773,8 @@ end
 
 -- str_cat(R[a], R[a+1])
 -- Operands: B
-function execute.op_strcat(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_strcat(vm: VM)
+    local A = fetch_B(vm)
 
     local val1 = vm:get_register(A)
     assert(val1.type == "string")
@@ -1745,10 +1789,10 @@ end
 
 -- R[a] = hash_new(R[a],R[a+1]..R[a+b*2-1])
 -- Operands: BB
-function execute.op_hash(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_hash(vm: VM)
+    local A, B = fetch_BB(vm)
 
-    local new_hash_val = class.instance_new(hash_class)
+    local new_hash_val = class.instance_new(class.builtins.Hash)
     local new_hash = new_hash_val.value :: Hash
 
     for i = A, A + 2*B - 1, 2 do
@@ -1764,8 +1808,8 @@ end
 
 -- hash_push(R[a],R[a+1]..R[a+b*2])
 -- Operands: BB
-function execute.op_hashadd(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_hashadd(vm: VM)
+    local A, B = fetch_BB(vm)
     local hash = vm:get_register(A)
     assert(hash.type == "hash")
 
@@ -1779,17 +1823,17 @@ end
 
 -- R[a] = hash_cat(R[a],R[a+1])
 -- Operands: B
-function execute.op_hashcat(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_hashcat(vm: VM)
+    local A = fetch_B(vm)
 
     local hash1 = vm:get_register(A)
     assert(hash1.type == "hash")
 
     local hash2 = vm:get_register(A + 1)
-    assert(hash1.type == "hash")
+    assert(hash2.type == "hash")
 
-    local new_hash_val = class.instance_new(hash_class)
-    local new_hash = new_hash_val.value :: Hash
+    local new_hash_val: HashValue = class.instance_new(class.builtins.Hash)
+    local new_hash = new_hash_val.value
 
     new_hash.hash = table.clone(hash1.value.hash)
 
@@ -1802,8 +1846,8 @@ end
 
 -- R[a] = lambda(Irep[b],L_LAMBDA)
 -- Operands: BB
-function execute.op_lambda(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_lambda(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local new_proc = proc_new(vm, vm.current_callinfo.irep.children[B + 1], "lambda")
     
@@ -1815,8 +1859,8 @@ end
 
 -- R[a] = lambda(Irep[b],L_BLOCK)
 -- Operands: BB
-function execute.op_block(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_block(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local new_proc = proc_new(vm, vm.current_callinfo.irep.children[B + 1], "block")
     
@@ -1828,8 +1872,8 @@ end
 
 -- R[a] = lambda(Irep[b],L_METHOD)
 -- Operands: BB
-function execute.op_method(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_method(vm: VM)
+    local A, B = fetch_BB(vm)
 
     -- Currently methods are like lambda
     -- TODO Make them into the Method class
@@ -1843,41 +1887,41 @@ end
 
 -- R(a) = range_new(R(a),R(a+1),FALSE)
 -- Operands: B
-function execute.op_range_inc(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_range_inc(vm: VM)
+    local A = fetch_B(vm)
     error("not implemented")
 end
 
 -- R(a) = range_new(R(a),R(a+1),TRUE)
 -- Operands: B
-function execute.op_range_exc(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_range_exc(vm: VM)
+    local A = fetch_B(vm)
     error("not implemented")
 end
 
 -- R(a) = ::Object
 -- Operands: B
-function execute.op_oclass(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_oclass(vm: VM)
+    local A = fetch_B(vm)
     
     vm:set_register(A, {
         type = "class",
-        value = object_class
+        value = class.builtins.Object
     })
 end
 
 -- R(a) = newclass(R(a),Syms(b),R(a+1))
 -- Operands: BB
-function execute.op_class(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_class(vm: VM)
+    local A, B = fetch_BB(vm)
     
     local class_name = symbol.symid_to_str(vm.current_callinfo.irep.syms[B + 1]) :: string
     local outer = vm:get_register(A)
     local val = vm:get_register(A + 1)
-    local super = if val.type == "class" then val.value else object_class
+    local super = if val.type == "class" then val.value else class.builtins.Object
 
     if super.is_singleton then
-        err.raise(vm, error_class.TypeError, `can't make subclass of singleton class`)
+        exception.raise(vm, exception.TypeError, `can't make subclass of singleton class`)
         return
     end
 
@@ -1896,17 +1940,17 @@ end
 
 -- R(a) = newmodule(R(a),Syms(b))
 -- Operands: BB
-function execute.op_module(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_module(vm: VM)
+    local A, B = fetch_BB(vm)
     
     local module_name = symbol.symid_to_str(vm.current_callinfo.irep.syms[B + 1]) :: string
     local outer = vm:get_register(A)
 
     local new_module: Class
     if outer.type == "class" then
-        new_module = class.define_class_under(vm, outer.value, module_name, module_class)
+        new_module = class.define_class_under(vm, outer.value, module_name, class.builtins.Module)
     else
-        new_module = class.define_class(vm, module_name, module_class)
+        new_module = class.define_class(vm, module_name, class.builtins.Module)
     end
 
     new_module.is_module = true
@@ -1919,8 +1963,8 @@ end
 
 -- R(a) = blockexec(R(a),Irep(b))
 -- Operands: BB
-function execute.op_exec(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_exec(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local val = vm:get_register(A)
     assert(val.type == "class")
@@ -1931,8 +1975,8 @@ end
 
 -- R(a).newmethod(Syms(b),R(a+1)); R(a) = Syms(b)
 -- Operands: BB
-function execute.op_def(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_def(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local val1 = vm:get_register(A)
     assert(val1.type == "class") -- TODO Support Module
@@ -1954,15 +1998,15 @@ end
 
 -- alias_method(target_class,Syms(a),Syms(b))
 -- Operands: BB
-function execute.op_alias(vm: VM, ext: number)
-    local A, B = opcodes.fetch_BB(vm.inst, ext)
+local function op_alias(vm: VM)
+    local A, B = fetch_BB(vm)
 
     local method_id = vm.current_callinfo.irep.syms[A + 1]
     local alias_id = vm.current_callinfo.irep.syms[B + 1]
 
     local cls = vm.current_callinfo.target_class
     if class.get_method(cls, method_id) == nil then
-        err.raise(vm, error_class.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
+        exception.raise(vm, exception.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
         return
     end
 
@@ -1971,14 +2015,14 @@ end
 
 -- undef_method(target_class,Syms(a))
 -- Operands: B
-function execute.op_undef(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_undef(vm: VM)
+    local A = fetch_B(vm)
 
     local method_id = vm.current_callinfo.irep.syms[A + 1]
 
     local cls = vm.current_callinfo.target_class
     if class.get_method(cls, method_id) == nil then
-        err.raise(vm, error_class.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
+        exception.raise(vm, exception.NameError, `undefined method '{symbol.symid_to_str(method_id)}' for class '{cls.name}'`)
         return
     end
 
@@ -1987,8 +2031,8 @@ end
 
 -- R(a) = R(a).singleton_class
 -- Operands: B
-function execute.op_sclass(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_sclass(vm: VM)
+    local A = fetch_B(vm)
     local obj = vm:get_register(A)
 
     local sclass = class.get_singleton_class(obj.value)
@@ -2000,8 +2044,8 @@ end
 
 -- R[a] = target_class
 -- Operands: B
-function execute.op_tclass(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_tclass(vm: VM)
+    local A = fetch_B(vm)
     vm:set_register(A, {
         type = "class",
         value = vm.current_callinfo.target_class
@@ -2010,47 +2054,160 @@ end
 
 -- print a,b,c
 -- Operands: BBB
-function execute.op_debug(vm: VM, ext: number)
-    local A, B, C = opcodes.fetch_BBB(vm.inst, ext)
+local function op_debug(vm: VM)
+    local A, B, C = fetch_BBB(vm)
     print(A, B, C)
 end
 
 -- raise(LocalJumpError, Pool(a))
 -- Operands: B
-function execute.op_err(vm: VM, ext: number)
-    local A = opcodes.fetch_B(vm.inst, ext)
+local function op_err(vm: VM)
+    local A = fetch_B(vm)
     
     local message = vm.current_callinfo.irep.pool[A + 1]
-    err.raise(vm, error_class.LocalJumpError, tostring(message))
+    exception.raise(vm, exception.LocalJumpError, tostring(message))
 end
 
+local function op_ext1(vm: VM)
+    fetch_Z(vm)
+end
+
+local function op_ext2(vm: VM)
+    fetch_Z(vm)
+end
+
+local function op_ext3(vm: VM)
+    fetch_Z(vm)
+end
+
+local function op_stop(vm: VM)
+    fetch_Z(vm)
+    vm.should_stop = true
+end
+
+local execute = {
+    [0] = op_nop,
+    op_move,
+    op_loadl,
+    op_loadi,
+    op_loadineg,
+    op_loadi__1,
+    op_loadi_0,
+    op_loadi_1,
+    op_loadi_2,
+    op_loadi_3,
+    op_loadi_4,
+    op_loadi_5,
+    op_loadi_6,
+    op_loadi_7,
+    op_loadi16,
+    op_loadi32,
+    op_loadsym,
+    op_loadnil,
+    op_loadself,
+    op_loadt,
+    op_loadf,
+    op_getgv,
+    op_setgv,
+    op_getsv,
+    op_setsv,
+    op_getiv,
+    op_setiv,
+    op_getcv,
+    op_setcv,
+    op_getconst,
+    op_setconst,
+    op_getmcnst,
+    op_setmcnst,
+    op_getupvar,
+    op_setupvar,
+    op_getidx,
+    op_setidx,
+    op_jmp,
+    op_jmpif,
+    op_jmpnot,
+    op_jmpnil,
+    op_jmpuw,
+    op_except,
+    op_rescue,
+    op_raiseif,
+    op_ssend,
+    op_ssendb,
+    op_send,
+    op_sendb,
+    op_call,
+    op_super,
+    op_argary,
+    op_enter,
+    op_key_p,
+    op_keyend,
+    op_karg,
+    op_return,
+    op_return_blk,
+    op_break,
+    op_blkpush,
+    op_add,
+    op_addi,
+    op_sub,
+    op_subi,
+    op_mul,
+    op_div,
+    op_eq,
+    op_lt,
+    op_le,
+    op_gt,
+    op_ge,
+    op_array,
+    op_array2,
+    op_arycat,
+    op_arypush,
+    op_arydup,
+    op_aref,
+    op_aset,
+    op_apost,
+    op_intern,
+    op_symbol,
+    op_string,
+    op_strcat,
+    op_hash,
+    op_hashadd,
+    op_hashcat,
+    op_lambda,
+    op_block,
+    op_method,
+    op_range_inc,
+    op_range_exc,
+    op_oclass,
+    op_class,
+    op_module,
+    op_exec,
+    op_def,
+    op_alias,
+    op_undef,
+    op_sclass,
+    op_tclass,
+    op_debug,
+    op_err,
+    op_ext1,
+    op_ext2,
+    op_ext3,
+    op_stop,
+}
+
 function VM.run(vm: VM)
-    local ext = 0
     while true do
-        local inst = vm.inst:read_byte()
+        local inst, _ = string.unpack(">B", vm.inst, vm.pc)
+
         local opcode = opcodes.opcodes[inst]
         assert(opcode ~= nil, `unknown opcode {inst}`)
-        
-        if opcode == "OP_EXT1" then
-            ext = 1
-            continue
-        elseif opcode == "OP_EXT2" then
-            ext = 2
-            continue
-        elseif opcode == "OP_EXT3" then
-            ext = 3
-            continue
-        elseif opcode == "OP_STOP" then
-            return
-        end
     
-        local func: ((vm: VM, ext: number) -> ())? = execute[ opcode:lower() ]
+        local func: ((vm: VM) -> ())? = execute[ inst ]
         assert(func ~= nil, `unknown or not implemented opcode: {inst} {opcode}`)
         
         if vm.debug_mode then
             print(`executing opcode: {tostring(opcode)}`) -- debug
         end
-        func(vm, ext)
+        func(vm)
     
         if vm.debug_mode then
             print(`registers (after executing): (-> {vm.current_callinfo.self_reg_idx})`)
@@ -2060,14 +2217,14 @@ function VM.run(vm: VM)
             print("")
         end
     
-        if ext ~= 0 then
-            ext = 0
-        end
-    
         if vm.should_stop then
             return
         end
-    
+
+        if vm.ext ~= 0 then
+            vm.ext = 0
+        end
+        
         if vm.exception.type == "nil" then
             continue
         end
@@ -2077,7 +2234,7 @@ function VM.run(vm: VM)
             -- We should first search for a rescue, if not then an ensure
             local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
             if handler then
-                vm.inst.cursor = vm.current_callinfo.irep.inst_idx + handler.target
+                vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
                 break
             end
     

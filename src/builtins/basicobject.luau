@@ -3,7 +3,7 @@
 local types = require("types")
 local class = require("class")
 local value = require("value")
-local err = require("error")
+local exception = require("exception")
 
 type State = types.State
 type Class = types.Class
@@ -14,9 +14,9 @@ class.define_method(BasicObject, "initialize", function(state: State, argc: numb
 
 class.define_method(BasicObject, "__id__", function(state: State, argc: number)
     if argc > 0 then
-        err.raise(
+        exception.raise(
             state.vm, 
-            class.get_class_by_name("ArgumentError") :: Class, 
+            exception.ArgumentError, 
             `wrong number of arguments (given {argc}, expected 0)`
         )
         return
@@ -30,9 +30,9 @@ end)
 
 class.define_method(BasicObject, "equal?", function(state: State, argc: number)
     if argc ~= 1 then
-        err.raise(
+        exception.raise(
             state.vm, 
-            class.get_class_by_name("ArgumentError") :: Class, 
+            exception.ArgumentError, 
             `wrong number of arguments (given {argc}, expected 1)`
         )
         return

@@ -4,7 +4,7 @@ ByteStream.__index = ByteStream
 function ByteStream.new(source: string)
     local self = {
         _source = source,
-        cursor = 0
+        cursor = 1
     }
 
     return setmetatable(self, ByteStream)
@@ -12,43 +12,32 @@ end
 
 function ByteStream:read_byte(bytes: number?): number
     bytes = bytes or 1
+    --assert(bytes > 0, `number of bytes must be greater than 0`)
 
-    local res = 0
-    for i, byte in { self._source:byte(self.cursor + 1, self.cursor + bytes) } do
-        res = bit32.bor(bit32.lshift(byte, (bytes - i) * 8), res)
+    local res: number, new_pos: number
+    if bytes == 1 then
+        -- For optimization purposes
+        res, new_pos = string.unpack(`>B`, self._source, self.cursor)
+    else        
+        res, new_pos = string.unpack(`>I{bytes}`, self._source, self.cursor)
     end
 
-    self.cursor += bytes
-
+    self.cursor = new_pos
     return res
 end
 
 function ByteStream:read_string(length: number?): string
-    
-    if length == nil then
-        local str = ""
-        while true do
-            local byte: number = self:read_byte()
-            if byte == nil then
-                -- incomplete!
-                error("incomplete string")
-            end
-
-            if byte == 0x0 then
-                return str
-            end
-
-            str ..= tostring(byte)
-        end
+    if length then
+        local str = self._source:sub(self.cursor, self.cursor + length - 1)
+        self.cursor += length
+        return str
     end
-
-    local endIdx = self.cursor + length
-    local str = self._source:sub(self.cursor + 1, endIdx)
-    self.cursor = endIdx
+    
+    local str, new_pos = string.unpack(">z", self._source, self.cursor)
+    self.cursor = new_pos
 
     return str
 end
-
 
 function ByteStream:skip(bytes: number)
     self.cursor += bytes

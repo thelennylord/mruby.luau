@@ -13,6 +13,7 @@ type Class = types.Class
 type State = types.State
 type String = types.String
 type CallInfo = types.CallInfo
+type ClassValue = types.ClassValue
 
 -- An empty class of Object was already pre-defined in class.luau
 local Object = class.define_class(nil, "Object", nil :: any)
@@ -45,7 +46,7 @@ end)
 class.define_method(Object, "inspect", function(state: State, argc: number)
     local self = state.get_register(0)
 
-    local ret = class.instance_new(class.get_class_by_name("String") :: Class);
+    local ret = class.instance_new(class.builtins.String);
     (ret.value :: String).str = `#<{self.value.class.name}:{tostring(self):sub(8)}>`
 
     state.set_register(0, ret)
@@ -71,7 +72,7 @@ end)
 class.define_method(Object, "class", function(state: State, argc: number)
     local val1 = state.get_register(0)
 
-    local ret: Value = {
+    local ret: ClassValue = {
         type = "class",
         value = class.get_class(val1.value)
     } 
@@ -140,4 +141,4 @@ class.define_method(Object, "echo", function(state: State, argc: number)
     state.set_register(0, state.get_register(argc))
 end)
 
-return Object
+return {}

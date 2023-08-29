@@ -3,17 +3,14 @@ local class = require("class")
 local types = require("types")
 local value = require("value")
 local symbol = require("symbol")
-local err = require("error")
-
-local object_class = require("builtins/object")
-local error_class = require("builtins/errors")
+local exception = require("exception")
 
 type VM = types.VM
 type Value = types.Value
 type State = types.State
 type Class = types.Class
 
-local Module = class.define_class(nil, "Module", object_class)
+local Module = class.define_class(nil, "Module", nil :: any)
 
 class.define_method(Module, "attr_reader", function(state: State, argc: number)
     local self = state.get_register(0)
@@ -28,7 +25,7 @@ class.define_method(Module, "attr_reader", function(state: State, argc: number)
         elseif val.type == "symbol" then
             attr_name = symbol.symid_to_str(val.value.sym_id) :: string
         else
-            err.raise(state.vm, error_class.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
+            exception.raise(state.vm, exception.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
             return
         end
     
@@ -54,7 +51,7 @@ class.define_method(Module, "attr_writer", function(state: State, argc: number)
         elseif val.type == "symbol" then
             attr_name = symbol.symid_to_str(val.value.sym_id) :: string
         else
-            err.raise(state.vm, error_class.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
+            exception.raise(state.vm, exception.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
             return
         end
     
@@ -80,7 +77,7 @@ class.define_method(Module, "attr_accessor", function(state: State, argc: number
         elseif val.type == "symbol" then
             attr_name = symbol.symid_to_str(val.value.sym_id) :: string
         else
-            err.raise(state.vm, error_class.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
+            exception.raise(state.vm, exception.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
             return
         end
     
@@ -99,10 +96,6 @@ class.define_method(Module, "attr_accessor", function(state: State, argc: number
     end
 end)
 
-class.define_method(Module, "include", function(state: State, argc: number)
-
-end)
-
 class.alias_method(Module, "attr", "attr_accessor")
 
-return Module
+return {}

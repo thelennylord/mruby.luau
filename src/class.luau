@@ -20,6 +20,8 @@ type Integer = types.Integer
 type Float = types.Float
 type Hash = types.Hash
 type Exception = types.Exception
+type Symbol = types.Symbol
+type ClassValue = types.ClassValue
 
 -- Predefine builtin classes
 local BasicObject: Class = {
@@ -191,6 +193,26 @@ local function define_class(vm: VM?, name: string, super: Class): Class
     return class
 end
 
+-- Predefine the other builtin classes
+local BUILTIN_CLASSES: { [string]: Class } = {
+    BasicObject = BasicObject,
+    Object = Object,
+    Module = Module,
+    Class = Class,
+    Exception = define_class(nil, "Exception", Object),
+    FalseClass = define_class(nil, "FalseClass", Object),
+    TrueClass = define_class(nil, "TrueClass", Object),
+    NilClass = define_class(nil, "NilClass", Object),
+    Integer = define_class(nil, "Integer", Object),
+    Float = define_class(nil, "Float", Object),
+    String = define_class(nil, "String", Object),
+    Proc = define_class(nil, "Proc", Object),
+    Range = define_class(nil, "Range", Object),
+    Array = define_class(nil, "Array", Object),
+    Hash = define_class(nil, "Hash", Object),
+    Symbol = define_class(nil, "Symbol", Object),
+}
+
 local function get_class(obj: Object): Class
     local cls = obj.class
     while cls.is_singleton == true or cls.is_module == true do
@@ -201,7 +223,7 @@ local function get_class(obj: Object): Class
 end
 
 local function get_class_from_name(name: string): Class?
-    local val = global.consts.get(symbol.str_to_symid(name))
+    local val = global.consts.get(symbol.str_to_symid(name)) :: ClassValue
     if val ~= nil then
         return val.value
     end
@@ -262,7 +284,7 @@ local function obj_kind_of(obj: Object, cls: Class): boolean
 end
 
 -- note: this is same as calling :allocate
-local function instance_new(cls: Class): { type: "object", value: Object }
+local function instance_new<T>(cls: Class): T
     local instance: Object = {
         class = cls,
         methods = cls.definitions,
@@ -270,32 +292,37 @@ local function instance_new(cls: Class): { type: "object", value: Object }
     }
 
     local obj_type = "object"
-    if obj_kind_of(instance, get_class_from_name("Array") :: Class) then
+    if obj_kind_of(instance, BUILTIN_CLASSES.Array) then
         obj_type = "array"
         (instance :: Array).array = {}
 
-    elseif obj_kind_of(instance, get_class_from_name("Hash") :: Class) then
+    elseif obj_kind_of(instance, BUILTIN_CLASSES.Hash) then
         obj_type = "hash"
         (instance :: Hash).hash = {}
 
-    elseif obj_kind_of(instance, get_class_from_name("String") :: Class) then
+    elseif obj_kind_of(instance, BUILTIN_CLASSES.String) then
         obj_type = "string"
         (instance :: String).str = ""
 
-    elseif obj_kind_of(instance, get_class_from_name("Proc") :: Class) then
+    elseif obj_kind_of(instance, BUILTIN_CLASSES.Proc) then
         obj_type = "proc"
         (instance :: Proc).type = "block"
 
-    elseif obj_kind_of(instance, get_class_from_name("Array") :: Class) then
+    elseif obj_kind_of(instance, BUILTIN_CLASSES.Range) then
         obj_type = "range"
         (instance :: Range).start = 0
         (instance :: Range).stop = 0
 
-    elseif obj_kind_of(instance, get_class_from_name("Exception") :: Class) then
+    elseif obj_kind_of(instance, BUILTIN_CLASSES.Exception) then
         obj_type = "exception"
         (instance :: Exception).call_nest = {}
         (instance :: Exception).method_id = 0
         (instance :: Exception).message = ""
+
+    elseif obj_kind_of(instance, BUILTIN_CLASSES.Symbol) then
+        obj_type = "symbol"
+        (instance :: Symbol).sym_str = ""
+        (instance :: Symbol).sym_id = -1
     end
 
     -- TODO Error for Integer, Class
@@ -402,4 +429,5 @@ return {
     get_singleton_class = get_singleton_class,
     get_class_from_name = get_class_from_name,
     alias_method = alias_method,
+    builtins = BUILTIN_CLASSES
 }

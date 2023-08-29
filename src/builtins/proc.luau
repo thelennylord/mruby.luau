@@ -1,6 +1,5 @@
 --!strict
 local types = require("types")
-local object_class = require("builtins/object")
 local class = require("class")
 
 type VM = types.VM
@@ -8,7 +7,7 @@ type IREP = types.IREP
 type Proc = types.Proc
 type State = types.State
 
-local Proc = class.define_class(nil, "Proc", object_class)
+local Proc = class.define_class(nil, "Proc", nil :: any)
 
 class.define_method(Proc, "initialize", function(state: State, argc: number)
     error("Proc intialization not implemented")
@@ -36,4 +35,4 @@ class.define_method(Proc, "call", function(state: State, argc: number)
     end
 end)
 
-return Proc
+return {}

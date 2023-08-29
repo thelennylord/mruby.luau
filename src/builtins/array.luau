@@ -2,16 +2,14 @@
 local types = require("types")
 local class = require("class")
 local value = require("value")
-local err = require("error")
-local error_class = require("builtins/errors")
-local object_class = require("builtins/object")
+local exception = require("exception")
 
 type VM = types.VM
 type Value = types.Value
 type Array = types.Array
 type State = types.State
 
-local Array = class.define_class(nil, "Array", object_class)
+local Array = class.define_class(nil, "Array", nil :: any)
 
 class.define_method(Array, "initialize", function(state: State, argc: number)
     local self = state.get_register(0)
@@ -35,7 +33,7 @@ class.define_method(Array, "initialize", function(state: State, argc: number)
 
         else
             local value_type = class.get_class(val.value).name
-            err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into Integer`)
+            exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
         end
 
         return
@@ -49,18 +47,18 @@ class.define_method(Array, "initialize", function(state: State, argc: number)
             arr.array = table.create(val1.value.number, val2.value)
         else
             local value_type = class.get_class(val1.value).name
-            err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into Integer`)
+            exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
         end
 
         return
     end
 
-    err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
+    exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1)`)
 end)
 
 class.define_method(Array, "[]", function(state: State, argc: number)
     if argc == 0 or argc > 2 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1..2)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1..2)`)
         return
     end
 
@@ -71,7 +69,7 @@ class.define_method(Array, "[]", function(state: State, argc: number)
     -- TODO Call to_int
     if idx.type ~= "integer" then
         local value_type = if idx.type == "object" then class.get_class(idx.value).name else idx.type:gsub("^%l", string.upper)
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into Integer`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
         return
     end
     
@@ -84,7 +82,7 @@ class.define_method(Array, "[]", function(state: State, argc: number)
     local till = state.get_register(3)
     if till.type ~= "integer" then
         local value_type = if till.type == "object" then class.get_class(till.value).name else till.type:gsub("^%l", string.upper)
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into Integer`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
         return
     end
 
@@ -98,7 +96,7 @@ end)
 
 class.define_method(Array, "[]=", function(state: State, argc: number)
     if argc == 0 or argc > 2 then
-        err.raise(state.vm, error_class.ArgumentError, `wrong number of arguments (given {argc}, expected 1..2)`)
+        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 1..2)`)
         return
     end
 
@@ -109,7 +107,7 @@ class.define_method(Array, "[]=", function(state: State, argc: number)
     -- TODO Call to_int
     if idx.type ~= "integer" then
         local value_type = class.get_class(idx.value).name
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into Integer`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
         return
     end
     
@@ -122,7 +120,7 @@ class.define_method(Array, "[]=", function(state: State, argc: number)
     local till = state.get_register(3)
     if till.type ~= "integer" then
         local value_type = class.get_class(till.value).name
-        err.raise(state.vm, error_class.TypeError, `no implicit conversion of {value_type} into Integer`)
+        exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
         return
     end
 
