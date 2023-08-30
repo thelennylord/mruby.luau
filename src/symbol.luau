@@ -10,7 +10,7 @@ end
 local function is_nested_sym(sym: string): boolean
 	assert(sym ~= nil)
 
-	return sym:find("::") ~= nil
+	return string.find(sym, "::") ~= nil
 end
 
 local function separate_nested_symid(sym: string): ...string

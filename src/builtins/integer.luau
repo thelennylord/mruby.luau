@@ -148,7 +148,7 @@ class.define_method(Integer, "inspect", function(state: State, argc: number)
 			repeat
 				local digit = (num % base) + 1
 				num = math.floor(num / base)
-				table.insert(num_str_arr, 1, digits:sub(digit, digit))
+				table.insert(num_str_arr, 1, string.sub(digits, digit, digit))
 			until num == 0
 			num_str = table.concat(num_str_arr, "")
 		end

@@ -37,6 +37,8 @@ type CatchHandler = types.CatchHandler
 type ByteStream = types.ByteStream
 type HashValue = types.HashValue
 type SymbolValue = types.SymbolValue
+type ExceptionValue = types.ExceptionValue
+type ArrayValue = types.ArrayValue
 
 --[[
     Helper functions
@@ -131,7 +133,9 @@ local function fetch_Bi(vm: VM): (number, number)
 	return A, B
 end
 
--- VM Class
+--[[
+	MRuby Virtual Machine
+]]
 local VM = {}
 VM.__index = VM
 
@@ -145,9 +149,8 @@ function VM.new(debug_mode: boolean?): VM
 		ensure_state = {
 			ensuring = false,
 		},
-		exception = value.nil_value,
+		exception = nil,
 		callinfo_stack = {},
-		registers = {},
 	}
 
 	return setmetatable(self, VM) :: any
@@ -157,7 +160,9 @@ function VM.load(vm: VM, inst: string, irep: IREP)
 	assert(inst ~= nil)
 	assert(irep ~= nil)
 
+	vm.registers = table.create(irep.num_regs)
 	vm.registers[1] = class.instance_new(class.builtins.Object)
+
 	vm.top_irep = irep
 	vm.inst = inst
 	vm.pc = irep.inst_idx
@@ -170,7 +175,7 @@ function VM.load(vm: VM, inst: string, irep: IREP)
 		self_class = nil,
 		arg_count = 0,
 		super_called = false,
-		method_sym = nil,
+		method_sym = "<top>",
 		deleted_kargs = {},
 		dead = false,
 	}
@@ -222,7 +227,7 @@ function VM.send_by_name(vm: VM, sym: string, A: number, C: number, call_super: 
 	local num_kwargs = bit32.extract(C, 4, 4)
 	local block_given = bit32.btest(C, 0x100)
 
-	local args = {}
+	local args = table.create(num_args)
 
 	-- Arguments are packed into an array, so unpack them
 	if num_args == CALL_MAXARGS then
@@ -283,8 +288,8 @@ function VM.send_by_name(vm: VM, sym: string, A: number, C: number, call_super: 
 			exception.raise(vm, exception.NoMethodError, `undefined local variable or method '{sym}' for {cls.name}`)
 		end
 
-		if #vm.callinfo_stack > 0 then
-			(vm.exception.value :: Exception).method_sym = vm.callinfo_stack[#vm.callinfo_stack].method_sym
+		if vm.exception and #vm.callinfo_stack > 0 then
+			vm.exception.method_sym = vm.current_callinfo.method_sym
 		end
 
 		return
@@ -315,8 +320,8 @@ function VM.send_by_name(vm: VM, sym: string, A: number, C: number, call_super: 
 
 		method.value(statefunc, #args)
 
-		if vm.exception and vm.exception.type == "exception" and vm.exception.value.method_sym == nil then
-			vm.exception.value.method_sym = sym
+		if vm.exception and vm.exception.method_sym == "?" then
+			vm.exception.method_sym = sym
 		end
 
 		-- Clear registers
@@ -354,7 +359,7 @@ function VM.enter_callinfo(
 		self_class = nil,
 		arg_count = arg_count,
 		super_called = false,
-		method_sym = method_sym,
+		method_sym = method_sym or "?",
 		deleted_kargs = {},
 		dead = false,
 	}
@@ -453,74 +458,83 @@ end
 
 -- R[a] = mrb_int(-1)
 -- Operands: B
+local int__1 = value.tointeger(-1)
 local function op_loadi__1(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(-1))
+	vm:set_register(A, int__1)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(0)
 -- Operands: B
+local int_0 = value.tointeger(0)
 local function op_loadi_0(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(0))
+	vm:set_register(A, int_0)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(1)
 -- Operands: B
+local int_1 = value.tointeger(1)
 local function op_loadi_1(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(1))
+	vm:set_register(A, int_1)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(2)
 -- Operands: B
+local int_2 = value.tointeger(2)
 local function op_loadi_2(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(2))
+	vm:set_register(A, int_2)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(3)
 -- Operands: B
+local int_3 = value.tointeger(3)
 local function op_loadi_3(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(3))
+	vm:set_register(A, int_3)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(4)
 -- Operands: B
+local int_4 = value.tointeger(4)
 local function op_loadi_4(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(4))
+	vm:set_register(A, int_4)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(5)
 -- Operands: B
+local int_5 = value.tointeger(5)
 local function op_loadi_5(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(5))
+	vm:set_register(A, int_5)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(6)
 -- Operands: B
+local int_6 = value.tointeger(6)
 local function op_loadi_6(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(6))
+	vm:set_register(A, int_6)
 end
 
--- R[a] = mrb_int(n)
+-- R[a] = mrb_int(7)
 -- Operands: B
+local int_7 = value.tointeger(7)
 local function op_loadi_7(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, value.tointeger(7))
+	vm:set_register(A, int_7)
 end
 
 -- R[a] = mrb_int16(b)
@@ -843,8 +857,10 @@ end
 local function op_except(vm: VM)
 	local A = fetch_B(vm)
 
-	vm:set_register(A, vm.exception)
-	vm.exception = value.nil_value
+	local exc_val: ExceptionValue = { type = "exception", value = vm.exception :: Exception }
+	vm.exception = nil
+
+	vm:set_register(A, exc_val)
 end
 
 -- R[b] = R[a].is_a?(R[b])
@@ -873,7 +889,7 @@ local function op_raiseif(vm: VM)
 	end
 
 	assert(val.type == "exception")
-	vm.exception = val
+	vm.exception = val.value
 end
 
 -- R[a] = self.send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..) (c=n|k<<4)
@@ -959,8 +975,8 @@ local function op_argary(vm: VM)
 		else vm.callinfo_stack[#vm.callinfo_stack - lv - 1].self_reg_idx + 1
 
 	-- Move all values of m1, *args and m2 arguments into a single array
-	local ary_val = class.instance_new(class.builtins.Array)
-	local new_ary = ary_val.value :: Array
+	local ary_val: ArrayValue = class.instance_new(class.builtins.Array)
+	local new_ary = ary_val.value
 	table.move(vm.registers, reg_idx, reg_idx + m1_count - 1, 1, new_ary.array)
 
 	reg_idx += m1_count
@@ -985,13 +1001,13 @@ local function op_argary(vm: VM)
 		assert(hash.type == "hash", `expected Hash but got {hash.type}`)
 
 		-- Duplicate the kwarg hash along with deleted OP_KARG keys
-		local dup_hash = class.instance_new(class.builtins.Hash)
+		local dup_hash: HashValue = class.instance_new(class.builtins.Hash)
 		for k, v in pairs(hash.value.hash) do
-			(dup_hash.value :: Hash).hash[k] = v
+			dup_hash.value.hash[k] = v
 		end
 
 		for k, v in pairs(vm.current_callinfo.deleted_kargs) do
-			(dup_hash.value :: Hash).hash[k] = v
+			dup_hash.value.hash[k] = v
 		end
 
 		vm:set_register(A + 1, dup_hash)
@@ -1039,8 +1055,8 @@ local function op_enter(vm: VM)
 	if should_rest then
 		-- Collect remaining values and put them in an array,
 		-- until we reach a Hash, Proc or NilClass
-		local new_arr_val = class.instance_new(class.builtins.Array)
-		local new_arr = new_arr_val.value :: Array
+		local new_arr_val: ArrayValue = class.instance_new(class.builtins.Array)
+		local new_arr = new_arr_val.value
 
 		do
 			local i = reg_idx
@@ -1598,8 +1614,8 @@ end
 local function op_array(vm: VM)
 	local A, B = fetch_BB(vm)
 
-	local new_arr_val = class.instance_new(class.builtins.Array)
-	local new_arr = new_arr_val.value :: Array
+	local new_arr_val: ArrayValue = class.instance_new(class.builtins.Array)
+	local new_arr = new_arr_val.value
 
 	for i = A, A + B do
 		table.insert(new_arr.array, vm:get_register(i))
@@ -1614,8 +1630,8 @@ end
 local function op_array2(vm: VM)
 	local A, B, C = fetch_BBB(vm)
 
-	local new_arr_val = class.instance_new(class.builtins.Array)
-	local new_arr = new_arr_val.value :: Array
+	local new_arr_val: ArrayValue = class.instance_new(class.builtins.Array)
+	local new_arr = new_arr_val.value
 
 	for i = B, B + C do
 		table.insert(new_arr.array, vm:get_register(i))
@@ -1661,8 +1677,8 @@ local function op_arydup(vm: VM)
 	local val1 = vm:get_register(A)
 	assert(val1.type == "array")
 
-	local new_arr_val = class.instance_new(class.builtins.Array)
-	local new_arr = new_arr_val.value :: Array
+	local new_arr_val: ArrayValue = class.instance_new(class.builtins.Array)
+	local new_arr = new_arr_val.value
 	new_arr.array = table.clone(val1.value.array)
 
 	return vm:set_register(A, new_arr_val)
@@ -1729,6 +1745,7 @@ local function op_apost(vm: VM)
 			type = "array",
 			value = {
 				class = class.builtins.Array,
+				methods = class.builtins.Array.definitions,
 				ivar = {},
 				array = table.clone(val1.value.array),
 			} :: Array,
@@ -1791,8 +1808,8 @@ end
 local function op_hash(vm: VM)
 	local A, B = fetch_BB(vm)
 
-	local new_hash_val = class.instance_new(class.builtins.Hash)
-	local new_hash = new_hash_val.value :: Hash
+	local new_hash_val: HashValue = class.instance_new(class.builtins.Hash)
+	local new_hash = new_hash_val.value
 
 	for i = A, A + 2 * B - 1, 2 do
 		local key = vm:get_register(i)
@@ -2084,7 +2101,7 @@ local function op_stop(vm: VM)
 	vm.should_stop = true
 end
 
-local execute = {
+local op_functions = {
 	[0] = op_nop,
 	op_move,
 	op_loadl,
@@ -2200,20 +2217,18 @@ function VM.run(vm: VM)
 		local opcode = opcodes.opcodes[inst]
 		assert(opcode ~= nil, `unknown opcode {inst}`)
 
-		local func: ((vm: VM) -> ())? = execute[inst]
-		assert(func ~= nil, `unknown or not implemented opcode: {inst} {opcode}`)
-
 		if vm.debug_mode then
-			print(`executing opcode: {tostring(opcode)}`) -- debug
+			print(`executing opcode: {opcode}`) -- debug
 		end
-		func(vm)
+
+		op_functions[inst](vm)
 
 		if vm.debug_mode then
 			print(`registers (after executing): (-> {vm.current_callinfo.self_reg_idx})`)
 			for i, v in vm.registers do
 				print(
 					`  {i} = {if v.type == "object"
-						then `#<{v.value.class.name}:{tostring(v.value):sub(#"table: " + 1)}>`
+						then `#<{v.value.class.name}:{string.sub(tostring(v.value), #"table: " + 1)}>`
 						elseif v.type == "class" then v.value.name
 						elseif v.type == "integer" then `int({v.value})`
 						else v.type}`
@@ -2230,7 +2245,7 @@ function VM.run(vm: VM)
 			vm.ext = 0
 		end
 
-		if vm.exception.type == "nil" then
+		if not vm.exception then
 			continue
 		end
 
@@ -2245,14 +2260,8 @@ function VM.run(vm: VM)
 
 			-- We reached the end and couldn't find a catch handler
 			if #vm.callinfo_stack == 0 then
-				local ex = vm.exception.value :: Exception
-				local msg = `in '{ex.method_sym}': {ex.message} ({ex.class.name})`
-
-				for i = #ex.call_nest, 1, -1 do
-					msg ..= `\n    in '{ex.call_nest[i]}'`
-				end
-
-				error(msg)
+				exception.print(vm.exception)
+				error(`\n\nAn exception occurred while executing; refer to the message above for more information`)
 			end
 
 			vm:exit_callinfo()

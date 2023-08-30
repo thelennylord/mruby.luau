@@ -21,14 +21,32 @@ type NilValue = types.NilValue
 type StringValue = types.StringValue
 
 -- Initialise the singleton true, false and nil value
-local True: TrueValue = class.instance_new(class.builtins.TrueClass)
-True.type = "true"
+local True: TrueValue = {
+	type = "true",
+	value = {
+		class = class.builtins.TrueClass,
+		methods = class.builtins.TrueClass.definitions,
+		ivar = {},
+	},
+}
 
-local False: FalseValue = class.instance_new(class.builtins.FalseClass)
-False.type = "false"
+local False: FalseValue = {
+	type = "false",
+	value = {
+		class = class.builtins.FalseClass,
+		methods = class.builtins.FalseClass.definitions,
+		ivar = {},
+	},
+}
 
-local Nil: NilValue = class.instance_new(class.builtins.NilClass)
-Nil.type = "nil"
+local Nil: NilValue = {
+	type = "nil",
+	value = {
+		class = class.builtins.NilClass,
+		methods = class.builtins.NilClass.definitions,
+		ivar = {},
+	},
+}
 
 -- Define conversion functions into their respective Ruby values
 local function toboolean(value: boolean): TrueValue | FalseValue
@@ -36,32 +54,54 @@ local function toboolean(value: boolean): TrueValue | FalseValue
 end
 
 local function tostr(value: string): StringValue
-	local str_val: StringValue = class.instance_new(class.builtins.String)
-	str_val.value.str = value
+	local string_value: StringValue = {
+		type = "string",
+		value = {
+			class = class.builtins.String,
+			methods = class.builtins.String.definitions,
+			ivar = {},
+			str = value,
+		},
+	}
 
-	return str_val
+	return string_value
 end
 
 local sym_literal_cache: { [string]: SymbolValue } = {}
 
 local function tosymbol(value: string): SymbolValue
 	if sym_literal_cache[value] == nil then
-		local symbol_value: SymbolValue = class.instance_new(class.builtins.Symbol)
-		symbol_value.type = "symbol"
-		symbol_value.value.symbol = value
+		local symbol_value: SymbolValue = {
+			type = "symbol",
+			value = {
+				class = class.builtins.Symbol,
+				methods = class.builtins.Symbol.definitions,
+				ivar = {},
+				symbol = value,
+			},
+		}
+
 		sym_literal_cache[value] = symbol_value
 	end
 
 	return sym_literal_cache[value]
 end
 
-local int_literal_cache: { [number]: IntegerValue } = {}
+-- Preallocate table for integers -1 and 0..7 as they are used in opcodes
+local int_literal_cache: { [number]: IntegerValue } = table.create(9)
 
 local function tointeger(value: number): IntegerValue
 	if int_literal_cache[value] == nil then
-		local int_value: IntegerValue = class.instance_new(class.builtins.Symbol)
-		int_value.type = "integer"
-		int_value.value.number = value
+		local int_value: IntegerValue = {
+			type = "integer",
+			value = {
+				class = class.builtins.Integer,
+				methods = class.builtins.Integer.definitions,
+				ivar = {},
+				number = value,
+			},
+		}
+
 		int_literal_cache[value] = int_value
 	end
 
@@ -72,9 +112,16 @@ local float_literal_cache: { [number]: FloatValue } = {}
 
 local function tofloat(value: number): FloatValue
 	if float_literal_cache[value] == nil then
-		local float_value: FloatValue = class.instance_new(class.builtins.Symbol)
-		float_value.type = "float"
-		float_value.value.number = value
+		local float_value: FloatValue = {
+			type = "float",
+			value = {
+				class = class.builtins.Float,
+				methods = class.builtins.Float.definitions,
+				ivar = {},
+				number = value,
+			},
+		}
+
 		float_literal_cache[value] = float_value
 	end
 

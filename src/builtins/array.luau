@@ -68,7 +68,7 @@ class.define_method(Array, "[]", function(state: State, argc: number)
 	if idx.type ~= "integer" then
 		local value_type = if idx.type == "object"
 			then class.get_class(idx.value).name
-			else idx.type:gsub("^%l", string.upper)
+			else string.gsub(idx.type, "^%l", string.upper)
 		exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
 		return
 	end
@@ -83,7 +83,7 @@ class.define_method(Array, "[]", function(state: State, argc: number)
 	if till.type ~= "integer" then
 		local value_type = if till.type == "object"
 			then class.get_class(till.value).name
-			else till.type:gsub("^%l", string.upper)
+			else string.gsub(till.type, "^%l", string.upper)
 		exception.raise(state.vm, exception.TypeError, `no implicit conversion of {value_type} into Integer`)
 		return
 	end

@@ -105,7 +105,6 @@ export type IREP = {
 	num_instructions: number,
 	catch_handlers: { CatchHandler },
 	pool: { boolean | string | number },
-	debug_instructions: { Instruction }, -- Debug only
 	symbols: { symbol },
 	children: { IREP },
 }
@@ -119,7 +118,7 @@ export type CallInfo = {
 
 	arg_count: number,
 	self_class: Class?,
-	method_sym: symbol?,
+	method_sym: symbol,
 	deleted_kargs: { [Value]: Value },
 	super_called: boolean,
 }
@@ -137,7 +136,7 @@ export type VM = {
 	inst: string,
 	ext: number,
 	registers: { Value },
-	exception: Value,
+	exception: Exception?,
 	debug_mode: boolean,
 
 	callinfo_stack: { CallInfo },
@@ -262,7 +261,7 @@ export type Value =
 
 --type error.luau
 export type Exception = Object & {
-	method_sym: symbol?,
+	method_sym: symbol,
 	message: string,
 	call_nest: { symbol },
 }
@@ -276,13 +275,6 @@ export type ByteStream = {
 	read_string: (self: ByteStream, length: number?) -> string,
 	skip: (self: ByteStream, bytes: number) -> (),
 	length: (self: ByteStream) -> number,
-}
---
-
---type load.luau
-export type Instruction = {
-	opcode: number,
-	operand: { number },
 }
 --
 

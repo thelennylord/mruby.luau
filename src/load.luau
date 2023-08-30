@@ -1,11 +1,9 @@
 --!strict
-local opcodes = require("opcodes")
 local types = require("types")
 
 type ByteStream = types.ByteStream
 type Proc = types.Proc
 type IREP = types.IREP
-type Instruction = types.Instruction
 type CatchHandler = types.CatchHandler
 
 local function read_binary_header(reader: ByteStream)
@@ -25,79 +23,6 @@ local function read_binary_header(reader: ByteStream)
 	-- section size
 	-- rite version
 	reader:skip(20)
-end
-
--- TODO Convert addresses into table
-local function read_instructions(reader: ByteStream, length: number): { Instruction }
-	local instructions: { Instruction } = {}
-	local ext_type = 0
-	--local jmp_pc_adjustments: { Instruction } = {}
-
-	local end_idx = reader.cursor + length
-	while reader.cursor < end_idx do
-		local where = reader.cursor
-		local opcode = reader:read_byte()
-		local op_name = opcodes.opcodes[opcode]
-		assert(op_name ~= nil, `invalid opcode \`{opcode}'`)
-
-		if op_name == "OP_EXT1" then
-			ext_type = 1
-			continue
-		end
-
-		if op_name == "OP_EXT2" then
-			ext_type = 2
-			continue
-		end
-
-		if op_name == "OP_EXT3" then
-			ext_type = 3
-			continue
-		end
-
-		local operand_types = opcodes.operands[opcode]
-		local operands = {}
-
-		for i = 1, #operand_types do
-			local operand_type = operand_types[i]
-			local operand: number
-
-			if operand_type == "B" then
-				operand = reader:read_byte()
-				if i < 3 and bit32.band(i, ext_type) ~= 0 then
-					operand = bit32.bor(bit32.lshift(operand, 8), reader:read_byte())
-				end
-			elseif operand_type == "S" then
-				operand = reader:read_byte(2)
-			elseif operand_type == "W" then
-				operand = reader:read_byte(3)
-			end
-
-			table.insert(operands, operand)
-		end
-
-		-- Reset ext_type to 0
-		if ext_type ~= 0 then
-			ext_type = 0
-		end
-
-		local inst = {
-			opcode = opcode,
-			operand = operands,
-			where = where,
-		}
-		-- Check if its a jump instruction and needs adjustments
-		-- OP_JMP
-		if inst.opcode == 0x25 then
-
-		-- OP_JMP, OP_JMPIF, OP_JMPNOT, OP_JMPNIL
-		elseif inst.opcode >= 0x26 and inst.opcode <= 0x28 then
-		end
-
-		table.insert(instructions, inst)
-	end
-
-	return instructions
 end
 
 local function read_catch_handlers(reader: ByteStream, length: number): { CatchHandler }
@@ -191,11 +116,7 @@ local function read_irep(reader: ByteStream, debug: boolean): IREP
 	irep.num_instructions = num_instructions
 	irep.inst_idx = reader.cursor
 
-	if debug then
-		irep.debug_instructions = read_instructions(reader, num_instructions)
-	else
-		reader:skip(num_instructions)
-	end
+	reader:skip(num_instructions)
 
 	irep.catch_handlers = read_catch_handlers(reader, num_catch_handler)
 

@@ -10,6 +10,8 @@ type State = types.State
 type VM = types.VM
 type Array = types.Array
 type Object = types.Object
+type ClassValue = types.ClassValue
+type ArrayValue = types.ArrayValue
 
 class.define_method(Class, "new", function(state: State, argc: number)
 	local self = state.get_register(0)
@@ -50,13 +52,13 @@ class.define_method(Class, "subclasses", function(state: State, argc: number)
 	assert(self.type == "class")
 
 	local cls = self.value
-	local new_arr_val = class.instance_new(class.builtins.Array)
-	local new_arr = new_arr_val.value :: Array
+	local new_arr_val: ArrayValue = class.instance_new(class.builtins.Array)
+	local new_arr = new_arr_val.value
 
-	for _, v in ipairs(cls) do
+	for _, subclass in cls.subclasses do
 		table.insert(new_arr.array, {
 			type = "class",
-			value = v,
+			value = subclass :: any, -- typechecker keeps complaining
 		})
 	end
 

@@ -28,7 +28,7 @@ end
 
 function ByteStream:read_string(length: number?): string
 	if length then
-		local str = self._source:sub(self.cursor, self.cursor + length - 1)
+		local str = string.sub(self._source, self.cursor, self.cursor + length - 1)
 		self.cursor += length
 		return str
 	end

@@ -11,8 +11,8 @@ type ExceptionValue = types.ExceptionValue
 local function sub_exception_new(vm: VM, exc_class: Class): Exception
 	assert(exc_class ~= nil)
 
-	local val = class.instance_new(exc_class)
-	local obj = val.value :: Exception
+	local val: ExceptionValue = class.instance_new(exc_class)
+	local obj = val.value
 
 	-- TODO: verify if the modification works
 	for i = #vm.callinfo_stack, 1, -1 do
@@ -24,52 +24,31 @@ local function sub_exception_new(vm: VM, exc_class: Class): Exception
 	return obj
 end
 
-local function exception_new(vm: VM, exc_class: Class, message: string): Value
+local function exception_new(vm: VM, exc_class: Class, message: string): Exception
 	local ex = sub_exception_new(vm, exc_class)
-	local ex_val: ExceptionValue = {
-		type = "exception",
-		value = ex,
-	}
-
 	ex.message = message or "Exception"
 
-	return ex_val
+	return ex
 end
 
 local function raise(vm: VM, exc_class: Class, message: string)
 	if vm ~= nil then
-		local class = exc_class -- TODO Add RuntimeError class here
-		vm.exception = exception_new(vm, class, message)
+		vm.exception = exception_new(vm, exc_class, message)
 	else
 		print(`Exception: {message or exc_class.sym} ({exc_class.sym})`)
 	end
 end
 
-local function print_exception(val: Value)
-	if val.type ~= "exception" then
-		return
-	end
-
-	local exc = val.value
+local function print_exception(exc: Exception)
 	local name = exc.class.sym
 
 	print(`Exception: {exc.message or name} ({name})`)
 end
 
-local function print_exception_vm(vm: VM)
-	if vm.exception.type ~= "exception" then
-		return
-	end
-
-	local exc = vm.exception.value
+local function print_exception_vm(exc: Exception)
 	local name = exc.class.sym
 
-	local str = `Exception:`
-	if exc.method_sym then
-		str ..= ` in \`{exc.method_sym}'`
-	end
-
-	str ..= ` {exc.message or name} ({name})\n`
+	local str = `Exception: in \`{exc.method_sym}': {exc.message or name} ({name})\n`
 
 	for _, v in exc.call_nest do
 		str ..= `    in \`{v}'`

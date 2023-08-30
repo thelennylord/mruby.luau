@@ -211,20 +211,11 @@ local BUILTIN_CLASSES: { [string]: Class } = {
 
 local function get_class(obj: Object): Class
 	local cls = obj.class
-	while cls.is_singleton == true or cls.is_module == true do
+	while cls.is_singleton or cls.is_module do
 		cls = cls.superclass
 	end
 
 	return cls
-end
-
-local function get_class_from_name(name: string): Class?
-	local val = global.consts.get(name) :: ClassValue
-	if val ~= nil then
-		return val.value
-	end
-
-	return nil
 end
 
 local function get_singleton_class(obj: Object): Class
@@ -267,8 +258,8 @@ end
 
 local function obj_kind_of(obj: Object, cls: Class): boolean
 	local c = obj.class
-	while c ~= nil do
-		if c.name == cls.name then
+	while c do
+		if c == cls then
 			return true
 		end
 
@@ -331,11 +322,8 @@ end
 
 local function get_method(obj: Object, sym: string): Method?
 	local method = obj.methods[sym]
-	if method then
-		return method
-	end
-
 	local cls = obj.class
+
 	while method == nil and cls ~= nil do
 		method = cls.definitions[sym]
 		cls = cls.superclass
@@ -370,16 +358,8 @@ local function alias_method(cls: Class, alias_name: string, method_name: string)
 end
 
 local function get_class_by_name(name: string): Class?
-	if name == nil then
-		return nil
-	end
-
 	local obj: Value = global.consts.get(name)
-	if obj == nil then
-		return nil
-	end
-
-	if obj.type ~= "class" then
+	if obj == nil or obj.type ~= "class" then
 		return nil
 	end
 
@@ -400,7 +380,6 @@ return {
 	get_super_method = get_super_method,
 	get_class = get_class,
 	get_singleton_class = get_singleton_class,
-	get_class_from_name = get_class_from_name,
 	alias_method = alias_method,
 	builtins = BUILTIN_CLASSES,
 }

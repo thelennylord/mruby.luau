@@ -27,7 +27,7 @@ class.define_method(Module, "attr_reader", function(state: State, argc: number)
 			exception.raise(
 				state.vm,
 				exception.TypeError,
-				`#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`
+				`#<{val.value.class.name}:{string.sub(tostring(val), 8)}> is not a symbol nor a string`
 			)
 			return
 		end
@@ -56,7 +56,7 @@ class.define_method(Module, "attr_writer", function(state: State, argc: number)
 			exception.raise(
 				state.vm,
 				exception.TypeError,
-				`#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`
+				`#<{val.value.class.name}:{string.sub(tostring(val), 8)}> is not a symbol nor a string`
 			)
 			return
 		end
@@ -85,7 +85,7 @@ class.define_method(Module, "attr_accessor", function(state: State, argc: number
 			exception.raise(
 				state.vm,
 				exception.TypeError,
-				`#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`
+				`#<{val.value.class.name}:{string.sub(tostring(val), 8)}> is not a symbol nor a string`
 			)
 			return
 		end

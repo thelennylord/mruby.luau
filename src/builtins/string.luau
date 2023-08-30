@@ -108,7 +108,7 @@ class.define_method(String, "to_i", function(state: State, argc: number)
 	local self = state.get_register(0)
 	assert(self.type == "string")
 
-	local beg, _, strnum = self.value.str:find("(^%d+)")
+	local beg, _, strnum = string.find(self.value.str, "(^%d+)")
 	if beg == nil then
 		state.set_register(0, value.tointeger(0))
 		return
@@ -126,7 +126,7 @@ class.define_method(String, "to_f", function(state: State, argc: number)
 	local self = state.get_register(0)
 	assert(self.type == "string")
 
-	local beg, _, strnum = self.value.str:find("^(%d+%.%d+)")
+	local beg, _, strnum = string.find(self.value.str, "^(%d+%.%d+)")
 	if beg == nil then
 		state.set_register(0, value.tofloat(0))
 		return
