@@ -23,9 +23,9 @@ class.define_method(BasicObject, "__id__", function(state: State, argc: number)
     end
 
     local self = state.get_register(0)
-    local id = tonumber(tostring(self):sub(8))
+    local id = tonumber(string.sub(tostring(self.value), 8)) :: number
 
-    state.set_register(0, value.autocast(id, "integer"))
+    state.set_register(0, value.tointeger(id))
 end)
 
 class.define_method(BasicObject, "equal?", function(state: State, argc: number)
@@ -41,13 +41,13 @@ class.define_method(BasicObject, "equal?", function(state: State, argc: number)
     local self = state.get_register(0)
     local other = state.get_register(1)
 
-    state.set_register(0, value.autocast(self == other))
+    state.set_register(0, value.toboolean(self == other))
 end)
 
 class.define_method(BasicObject, "!", function(state: State, argc: number)
     local self = state.get_register(0)
 
-    local ret = value.autocast(self.type == "nil" or self.type == "false")
+    local ret = value.toboolean(self.type == "nil" or self.type == "false")
     state.set_register(0, ret)
 end)
 

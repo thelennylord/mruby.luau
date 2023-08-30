@@ -19,11 +19,10 @@ class.define_method(Proc, "call", function(state: State, argc: number)
 
     local proc = self.value
     local embracing_callinfo = proc.embracing_callinfo
-    local method_id = if embracing_callinfo ~= nil then embracing_callinfo.method_id else 0
 
-    --local callinfo = state.vm:push_callinfo(method_id or 0, state.current_self_idx - state.vm.current_self_idx, argc)
+    --local callinfo = state.vm:push_callinfo(method_sym or 0, state.current_self_idx - state.vm.current_self_idx, argc)
     local callinfo = state.vm:enter_callinfo(
-        method_id, 
+        embracing_callinfo.method_sym, 
         proc.irep, 
         state.vm.current_callinfo.target_class, 
         state.current_self_idx - state.vm.current_callinfo.self_reg_idx, 

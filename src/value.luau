@@ -18,17 +18,70 @@ type SymbolValue = types.SymbolValue
 type TrueValue = types.TrueValue
 type FalseValue = types.FalseValue
 type NilValue = types.NilValue
+type StringValue = types.StringValue
 
-local singleton_instances: { [string]: Value } = {
-    True = class.instance_new(class.builtins.TrueClass),
-    False = class.instance_new(class.builtins.FalseClass),
-    Nil = class.instance_new(class.builtins.NilClass)
-}
+-- Initialise the singleton true, false and nil value
+local True: TrueValue = class.instance_new(class.builtins.TrueClass)
+True.type = "true"
 
-(singleton_instances.True :: TrueValue).type = "true"
-(singleton_instances.False:: FalseValue).type = "false"
-(singleton_instances.Nil :: NilValue).type = "nil"
+local False: FalseValue = class.instance_new(class.builtins.FalseClass)
+False.type = "false"
 
+local Nil: NilValue = class.instance_new(class.builtins.NilClass)
+Nil.type = "nil"
+
+-- Define conversion functions into their respective Ruby values
+local function toboolean(value: boolean): TrueValue | FalseValue
+    return if value then True else False
+end
+
+local function tostr(value: string): StringValue
+    local str_val: StringValue = class.instance_new(class.builtins.String)
+    str_val.value.str = value
+
+    return str_val
+end
+
+local sym_literal_cache: { [string]: SymbolValue } = {}
+
+local function tosymbol(value: string): SymbolValue
+    if sym_literal_cache[value] == nil then
+        local symbol_value: SymbolValue = class.instance_new(class.builtins.Symbol)
+        symbol_value.type = "symbol"
+        symbol_value.value.symbol = value
+        sym_literal_cache[value] = symbol_value
+    end
+
+    return sym_literal_cache[value]
+end
+
+local int_literal_cache: { [number]: IntegerValue } = {}
+
+local function tointeger(value: number): IntegerValue
+    if int_literal_cache[value] == nil then
+        local int_value: IntegerValue = class.instance_new(class.builtins.Symbol)
+        int_value.type = "integer"
+        int_value.value.number = value
+        int_literal_cache[value] = int_value
+    end
+
+    return int_literal_cache[value]
+end
+
+local float_literal_cache: { [number]: FloatValue } = {}
+
+local function tofloat(value: number): FloatValue
+    if float_literal_cache[value] == nil then
+        local float_value: FloatValue = class.instance_new(class.builtins.Symbol)
+        float_value.type = "float"
+        float_value.value.number = value
+        float_literal_cache[value] = float_value
+    end
+
+    return float_literal_cache[value]
+end
+
+-- Util function for quick comparsion between ruby literals
 local function compare(val1: Value, val2: Value): number
     if (val1.type == "integer" or val1.type == "float") and (val2.type == "integer" or val2.type == "float") then
         return val1.value.number - val2.value.number
@@ -37,65 +90,15 @@ local function compare(val1: Value, val2: Value): number
     error(`internal: compare for other types not implemented`)
 end
 
--- Immediate values
-local function autocast(value: unknown, _type: string?): Value
-    if type(value) == "boolean" then
-        return if value then singleton_instances.True else singleton_instances.False
-
-    elseif type(value) == "nil" then
-        return singleton_instances.Nil
-    
-    elseif type(value) == "number" then
-        if _type == "integer" then
-            local key = "i" .. value
-            if singleton_instances[key] == nil then
-                local int_value: IntegerValue = class.instance_new(class.builtins.Integer)
-                int_value.type = "integer"
-                int_value.value.number = math.floor(value)
-                singleton_instances[key] = int_value
-            end
-    
-            return singleton_instances[key]
-            
-        elseif _type == "float" then
-            local key = "f" .. value
-            if singleton_instances[key] == nil then
-                local float_value: FloatValue = class.instance_new(class.builtins.Float)
-                float_value.type = "float"
-                float_value.value.number = value
-    
-                singleton_instances[key] = float_value
-            end
-    
-            return singleton_instances[key]
-    
-        elseif _type == "symbol" then
-            local key = "s" .. value
-            if singleton_instances[key] == nil then
-                local symbol_value: SymbolValue = class.instance_new(class.builtins.Symbol)
-                symbol_value.type = "symbol"
-                symbol_value.value.sym_id = value
-                singleton_instances[key] = symbol_value
-            end
-    
-            return singleton_instances[key]
-        end
-    
-        error(`could not determine value cast for number {value} (is it an integer or a float?)`)
-    end
-
-    error("could not determine type to cast value into")
-end
-
-type autocast = (
-    (value: boolean, _type: nil) -> { type: "true" | "false", value: boolean }
-    | (value: number, _type: "integer") -> { type: "integer", value: number }
-    | (value: number, _type: "float") -> { type: "float", value: number }
-    | (value: number, _type: "symbol") -> { type: "symbol", value: number }
-    | (value: nil, _type: nil) -> { type: "nil", value: nil }
-)
-
 return {
     compare = compare,
-    autocast = autocast
+    
+    tosymbol = tosymbol,
+    toboolean = toboolean,
+    tostr = tostr,
+    tointeger = tointeger,
+    tofloat = tofloat,
+    nil_value = Nil,
+    false_value = False,
+    true_value = True
 }

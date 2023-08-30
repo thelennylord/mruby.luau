@@ -1,7 +1,6 @@
 --!strict
 local types = require("types")
 local opcodes = require("opcodes")
-local symbol = require("symbol")
 
 type ByteStream = types.ByteStream
 type Proc = types.Proc
@@ -164,8 +163,8 @@ local function read_pool(reader: ByteStream, length: number): { boolean | string
     return pool
 end
 
-local function read_syms(reader: ByteStream, length: number): { number }
-    local syms: { number } = {}
+local function read_syms(reader: ByteStream, length: number): { string }
+    local syms: { string } = {}
 
     while #syms < length do
         local len = reader:read_byte(2)
@@ -174,7 +173,7 @@ local function read_syms(reader: ByteStream, length: number): { number }
         -- Skip \0
         reader:skip(1)
 
-        table.insert(syms, symbol.str_to_symid(str))
+        table.insert(syms, str)
     end
 
     return syms
@@ -208,7 +207,7 @@ local function read_irep(reader: ByteStream, debug: boolean): IREP
     irep.pool = read_pool(reader, pool_len)
 
     local syms_len = reader:read_byte(2)
-    irep.syms = read_syms(reader, syms_len)
+    irep.symbols = read_syms(reader, syms_len)
 
     irep.children = {}
     for _ = 1, num_child_ireps do

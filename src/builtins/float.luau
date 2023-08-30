@@ -18,7 +18,7 @@ class.define_method(Float, "zero?", function(state: State, argc: number)
     end
 
     local val = state.get_register(0) :: FloatValue
-    state.set_register(0, value.autocast(val.value.number == 0))
+    state.set_register(0, value.toboolean(val.value.number == 0))
 end)
 
 class.define_method(Float, "nonzero?", function(state: State, argc: number)
@@ -28,7 +28,7 @@ class.define_method(Float, "nonzero?", function(state: State, argc: number)
     end
 
     local val = state.get_register(0) :: FloatValue
-    state.set_register(0, value.autocast(val.value.number ~= 0))
+    state.set_register(0, value.toboolean(val.value.number ~= 0))
 end)
 
 class.define_method(Float, "positive?", function(state: State, argc: number)
@@ -38,7 +38,7 @@ class.define_method(Float, "positive?", function(state: State, argc: number)
     end
 
     local val = state.get_register(0) :: FloatValue
-    state.set_register(0, value.autocast(val.value.number > 0))
+    state.set_register(0, value.toboolean(val.value.number > 0))
 end)
 
 class.define_method(Float, "negative?", function(state: State, argc: number)
@@ -48,7 +48,7 @@ class.define_method(Float, "negative?", function(state: State, argc: number)
     end
 
     local val = state.get_register(0) :: FloatValue
-    state.set_register(0, value.autocast(val.value.number < 0))
+    state.set_register(0, value.toboolean(val.value.number < 0))
 end)
 
 class.define_method(Float, "abs", function(state: State, argc: number)
@@ -58,7 +58,7 @@ class.define_method(Float, "abs", function(state: State, argc: number)
     end
 
     local val = state.get_register(0) :: FloatValue
-    state.set_register(0, value.autocast(math.abs(val.value.number), "float"))
+    state.set_register(0, value.tofloat(math.abs(val.value.number)))
 end)
 class.alias_method(Float, "magnitude", "abs")
 
@@ -69,7 +69,7 @@ class.define_method(Float, "abs2", function(state: State, argc: number)
     end
 
     local val = state.get_register(0) :: FloatValue
-    state.set_register(0, value.autocast(math.abs(val.value.number) ^ 2, "float"))
+    state.set_register(0, value.tofloat(math.abs(val.value.number) ^ 2))
 end)
 
 class.define_method(Float, "integer?", function(state: State, argc: number)
@@ -78,7 +78,7 @@ class.define_method(Float, "integer?", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(false))
+    state.set_register(0, value.false_value)
 end)
 
 class.define_method(Float, "to_i", function(state: State, argc: number)
@@ -88,7 +88,7 @@ class.define_method(Float, "to_i", function(state: State, argc: number)
     end
     
     local self = state.get_register(0) :: FloatValue
-    state.set_register(0, value.autocast(math.floor(self.value.number), "integer`"))
+    state.set_register(0, value.tointeger(math.floor(self.value.number)))
 end)
 class.alias_method(Float, "to_int", "to_i")
 
@@ -108,10 +108,8 @@ class.define_method(Float, "inspect", function(state: State, argc: number)
     end
     
     local val = state.get_register(0) :: FloatValue
-    local new_str_val: StringValue = class.instance_new(class.builtins.String)
-    new_str_val.value.str = tostring(val.value.number)
 
-    state.set_register(0, new_str_val)
+    state.set_register(0, value.tostr(tostring(val.value.number)))
 end)
 class.alias_method(Float, "to_s", "inspect")
 
@@ -128,7 +126,7 @@ class.define_method(Float, "div", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(math.floor(self.value.number / val.value.number), "integer"))
+    state.set_register(0, value.tointeger(math.floor(self.value.number / val.value.number)))
 end)
 
 class.define_method(Float, "fdiv", function(state: State, argc: number)
@@ -144,7 +142,7 @@ class.define_method(Float, "fdiv", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(self.value.number / val.value.number, "float"))
+    state.set_register(0, value.tofloat(self.value.number / val.value.number))
 end)
 class.alias_method(Float, "quo", "fdiv")
 
@@ -174,7 +172,7 @@ class.define_method(Float, "ceil", function(state: State, argc: number)
         ret = self.value.number - (self.value.number % -10^ndigits)
     end
 
-    state.set_register(0, value.autocast(ret, "float"))
+    state.set_register(0, value.tofloat(ret))
 end)
 
 class.define_method(Float, "floor", function(state: State, argc: number)
@@ -203,7 +201,7 @@ class.define_method(Float, "floor", function(state: State, argc: number)
         ret = self.value.number - (self.value.number % -10^ndigits)
     end
 
-    state.set_register(0, value.autocast(ret, "float"))
+    state.set_register(0, value.tofloat(ret))
 end)
 
 return {}

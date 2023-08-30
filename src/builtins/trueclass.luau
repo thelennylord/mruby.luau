@@ -21,7 +21,7 @@ class.define_method(TrueClass, "&", function(state: State, argc: number)
 
     local val = state.get_register(1)
     if val.type == "nil" or val.type == "false" then
-        state.set_register(0, value.autocast(false))
+        state.set_register(0, value.false_value)
     end
 end)
 
@@ -33,7 +33,7 @@ class.define_method(TrueClass, "^", function(state: State, argc: number)
 
     local val = state.get_register(1)
     if val.type ~= "nil" and val.type ~= "false" then
-        state.set_register(0, value.autocast(false))
+        state.set_register(0, value.false_value)
     end
 end)
 
@@ -50,10 +50,7 @@ class.define_method(TrueClass, "to_s", function(state: State, argc: number)
         return
     end
 
-    local ret = class.instance_new(class.builtins.String);
-    (ret.value :: String).str = "true"
-
-    state.set_register(0, ret)
+    state.set_register(0, value.tostr("true"))
 end)
 class.alias_method(TrueClass, "inspect", "to_s")
 

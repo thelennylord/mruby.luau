@@ -1,46 +1,44 @@
 -- Constant and global variable store
 local types = require("types")
-local keyvalue = require("keyvalue")
 local symbol = require("symbol")
 
 type Class = types.Class
 type Value = types.Value
-type KeyValue = types.KeyValue
 type Symbol = types.Symbol
 
-local consts: KeyValue = keyvalue.new()
-local globals: KeyValue = keyvalue.new()
+local consts: { [string]: Value } = {}
+local globals: { [string]: Value } = {}
 
-local function set_const(sym_id: number, value: Value)
-    if consts[sym_id] ~= nil then
+local function set_const(sym: string, value: Value)
+    if consts[sym] ~= nil then
         -- TODO
-        print(`warn: constant already initialised: {symbol.symid_to_str(sym_id)}`)
+        print(`warn: constant already initialised: {sym}`)
     end
 
-    consts[sym_id] = value
+    consts[sym] = value
 end
 
-local function get_const(sym_id: number): Value
-    return consts[sym_id]
+local function get_const(sym: string): Value
+    return consts[sym]
 end
 
 
-local function set_class_const(class: Class, sym_id: number, value: Value)
-    local new_symid = symbol.make_nested_sym(class.sym_id, sym_id)
+local function set_class_const(class: Class, sym: string, value: Value)
+    local new_sym = symbol.make_nested_sym(class.sym, sym)
 
     if value.type == "class" then
-        value.value.sym_id = new_symid
+        value.value.sym = new_sym
     end
 
-    set_const(new_symid, value)
+    set_const(new_sym, value)
 end
 
-local function get_class_const(class: Class, sym_id: number): Value?
+local function get_class_const(class: Class, sym: string): Value?
     local obj: Value? = nil
 
     while obj == nil and class ~= nil do
-        local nested_symid = symbol.make_nested_sym(class.sym_id, sym_id)
-        obj = consts[nested_symid]
+        local nested_sym = symbol.make_nested_sym(class.sym, sym)
+        obj = consts[nested_sym]
 
         class = class.superclass
     end
@@ -48,12 +46,12 @@ local function get_class_const(class: Class, sym_id: number): Value?
     return obj
 end
 
-local function set_global(sym_id: number, value: Value)
-    globals[sym_id] = value
+local function set_global(sym: string, value: Value)
+    globals[sym] = value
 end
 
-local function get_global(sym_id: number): Value?
-    return globals[sym_id]
+local function get_global(sym: string): Value?
+    return globals[sym]
 end
 
 return {

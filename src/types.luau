@@ -3,10 +3,12 @@
 -- Made to avoid cyclic dependency
 
 --type class.luau
+export type symbol = string
+
 export type State = {
     get_register: (register: number) -> Value,
     set_register: (register: number, val: Value) -> (),
-    send_by_name: (sym_id: number, A: number, C: number, super: boolean) -> (),
+    send_by_name: (sym: string, A: number, C: number, super: boolean) -> (),
     vm: VM,
     current_self_idx: number
 }
@@ -14,22 +16,22 @@ export type State = {
 export type LuaMethod = (state: State, argc: number) -> ()
 
 export type Method = { 
-    sym_id: number, 
+    sym: string, 
     type: "irep", 
     value: IREP 
 } | { 
-    sym_id: number,
+    sym: string,
     type: "luafunc", 
     value: LuaMethod 
 }
 
 export type Class = Object & {
     name: string,
-    sym_id: number,
+    sym: string,
     superclass: Class,
     subclasses: { Class },
-    cvar: KeyValue,
-    definitions: { [number]: Method }, -- new_obj.methods = definitions when :new is sent
+    cvar: { [symbol]: Value },
+    definitions: { [symbol]: Method }, -- new_obj.methods = definitions when :new is sent
 
     is_singleton: boolean,
     attached_object: Object?, -- not nil if is_singleton == true
@@ -38,8 +40,8 @@ export type Class = Object & {
 }
 
 export type Object = {
-    ivar: KeyValue,
-    methods: { [number]: Method },
+    ivar: { [symbol]: Value },
+    methods: { [symbol]: Method },
     class: Class
 }
 
@@ -84,8 +86,7 @@ export type Proc = Object & {
 }
 
 export type Symbol = Object & {
-    sym_id: number,
-    sym_str: string
+    symbol: string
 }
 
 export type TrueClass = Object
@@ -109,7 +110,7 @@ export type IREP = {
     catch_handlers: { CatchHandler },
     pool: { boolean | string | number },
     debug_instructions: { Instruction }, -- Debug only
-    syms: { number },
+    symbols: { symbol },
     children: { IREP }
 }
 
@@ -122,7 +123,7 @@ export type CallInfo = {
     
     arg_count: number,
     self_class: Class?,
-    method_id: number?,
+    method_sym: symbol?,
     deleted_kargs: { [Value] : Value },
     super_called: boolean,
 }
@@ -152,9 +153,9 @@ export type VM = {
     -- Gets the register relative to current_reg (Indexing begins from 1 just like lua)
     get_register: (self: VM, register: number) -> Value,
     set_register: (self: VM, register: number, value: Value) -> (),
-    enter_callinfo: (self: VM, method_id: number?, irep: IREP, target_class: Class, self_idx: number, arg_count: number) -> CallInfo,
+    enter_callinfo: (self: VM, method_sym: symbol?, irep: IREP, target_class: Class, self_idx: number, arg_count: number) -> CallInfo,
     exit_callinfo: (self: VM) -> (),
-    send_by_name: (self: VM, sym_id: number, A: number, C: number, super_called: boolean?, __wait_until_done: boolean?) -> (), -- __wait_until_done is used internally, do not use!
+    send_by_name: (self: VM, sym: string, A: number, C: number, super_called: boolean?, __wait_until_done: boolean?) -> (), -- __wait_until_done is used internally, do not use!
     get_self: (self: VM) -> Value,
     get_catch_handler: (self: VM, handler_type: string) -> CatchHandler?,
     read_instruction: (self: VM) -> ("continue" | "stop" | "error")
@@ -238,16 +239,11 @@ export type Value =
     | ProcValue | ArrayValue | StringValue | RangeValue | HashValue | ExceptionValue
 --end
 
---type keyvalue.luau
-type sym_id = number
-export type KeyValue = { [sym_id]: Value }
---end
-
 --type error.luau
 export type Exception = Object & {
-    method_id: sym_id?,
+    method_sym: symbol?,
     message: string,
-    call_nest: { sym_id }
+    call_nest: { symbol }
 }
 --
 

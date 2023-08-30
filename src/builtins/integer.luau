@@ -18,7 +18,7 @@ class.define_method(Integer, "zero?", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(self.value.number == 0))
+    state.set_register(0, value.toboolean(self.value.number == 0))
 end)
 
 class.define_method(Integer, "nonzero?", function(state: State, argc: number)
@@ -28,7 +28,7 @@ class.define_method(Integer, "nonzero?", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(self.value.number ~= 0))
+    state.set_register(0, value.toboolean(self.value.number ~= 0))
 end)
 
 class.define_method(Integer, "positive?", function(state: State, argc: number)
@@ -38,7 +38,7 @@ class.define_method(Integer, "positive?", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(self.value.number > 0))
+    state.set_register(0, value.toboolean(self.value.number > 0))
 end)
 
 class.define_method(Integer, "negative?", function(state: State, argc: number)
@@ -48,7 +48,7 @@ class.define_method(Integer, "negative?", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(self.value.number < 0))
+    state.set_register(0, value.toboolean(self.value.number < 0))
 end)
 
 class.define_method(Integer, "abs", function(state: State, argc: number)
@@ -58,7 +58,7 @@ class.define_method(Integer, "abs", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(math.abs(self.value.number), "integer"))
+    state.set_register(0, value.tointeger(math.abs(self.value.number)))
 end)
 
 class.define_method(Integer, "abs2", function(state: State, argc: number)
@@ -68,7 +68,7 @@ class.define_method(Integer, "abs2", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(math.abs(self.value.number) ^ 2, "integer"))
+    state.set_register(0, value.tointeger(math.abs(self.value.number) ^ 2))
 end)
 
 class.define_method(Integer, "integer?", function(state: State, argc: number)
@@ -77,7 +77,7 @@ class.define_method(Integer, "integer?", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(true))
+    state.set_register(0, value.true_value)
 end)
 
 class.define_method(Integer, "even?", function(state: State, argc: number)
@@ -87,7 +87,7 @@ class.define_method(Integer, "even?", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(self.value.number % 2 == 0))
+    state.set_register(0, value.toboolean(self.value.number % 2 == 0))
 end)
 
 class.define_method(Integer, "odd?", function(state: State, argc: number)
@@ -97,7 +97,7 @@ class.define_method(Integer, "odd?", function(state: State, argc: number)
     end
 
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(self.value.number % 2 == 1))
+    state.set_register(0, value.toboolean(self.value.number % 2 == 1))
 end)
 
 class.define_method(Integer, "to_i", function(state: State, argc: number)
@@ -117,8 +117,7 @@ class.define_method(Integer, "inspect", function(state: State, argc: number)
     end
     
     local val = state.get_register(0) :: IntegerValue
-    local new_str_val: StringValue = class.instance_new(class.builtins.String);
-    new_str_val.value.str = tostring(val.value.number)
+    local num_str = tostring(val.value.number) :: string
 
     if argc == 1 then
         local val1 = state.get_register(1)
@@ -136,22 +135,22 @@ class.define_method(Integer, "inspect", function(state: State, argc: number)
         if base ~= 10 then
             local num = val.value.number
             local digits = "0123456789abcdefghijklmnopqrstuvwxyz"
-            local num_str = {}
+            local num_str_arr = {}
             if num < 0 then
-                table.insert(num_str, "-")
+                table.insert(num_str_arr, "-")
             end
     
             num = math.abs(num)
             repeat
                 local digit = (num % base) + 1
                 num = math.floor(num / base)
-                table.insert(num_str, 1, digits:sub(digit, digit))
+                table.insert(num_str_arr, 1, digits:sub(digit, digit))
             until num == 0
-            (new_str_val.value :: String).str = table.concat(num_str, "")
+            num_str = table.concat(num_str_arr, "")
         end 
     end
 
-    state.set_register(0, new_str_val)
+    state.set_register(0, value.tostr(num_str))
 end)
 class.alias_method(Integer, "to_s", "inspect")
 
@@ -162,7 +161,7 @@ class.define_method(Integer, "succ", function(state: State, argc: number)
     end
     
     local self = state.get_register(0) :: IntegerValue
-    state.set_register(0, value.autocast(self.value.number + 1, "integer"))
+    state.set_register(0, value.tointeger(self.value.number + 1))
 end)
 class.alias_method(Integer, "next", "succ")
 
@@ -179,7 +178,7 @@ class.define_method(Integer, "div", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(math.floor(self.value.number / val.value.number), "integer"))
+    state.set_register(0, value.tointeger(math.floor(self.value.number / val.value.number)))
 end)
 
 class.define_method(Integer, "ceil", function(state: State, argc: number)
@@ -208,7 +207,7 @@ class.define_method(Integer, "ceil", function(state: State, argc: number)
         ret = self.value.number - (self.value.number % -10^ndigits)
     end
 
-    state.set_register(0, value.autocast(ret, "integer"))
+    state.set_register(0, value.tointeger(ret))
 end)
 
 class.define_method(Integer, "floor", function(state: State, argc: number)
@@ -237,7 +236,7 @@ class.define_method(Integer, "floor", function(state: State, argc: number)
         ret = self.value.number - (self.value.number % -10^ndigits)
     end
 
-    state.set_register(0, value.autocast(ret, "integer"))
+    state.set_register(0, value.tointeger(ret))
 end)
 
 return {}

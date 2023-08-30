@@ -26,7 +26,7 @@ class.define_method(Array, "initialize", function(state: State, argc: number)
     if argc > 1 then
         local val = state.get_register(1)
         if val.type == "integer" and val.value.number > 0 then
-            arr.array = table.create(val.value.number, value.autocast(nil))
+            arr.array = table.create(val.value.number, value.nil_value)
 
         elseif val.type == "array" then
             arr.array = val.value.array
@@ -74,7 +74,7 @@ class.define_method(Array, "[]", function(state: State, argc: number)
     end
     
     if argc == 1 then
-        local val = self.value.array[idx.value.number + 1] or value.autocast(nil)
+        local val = self.value.array[idx.value.number + 1] or value.nil_value
         state.set_register(0, val)
         return
     end
@@ -112,7 +112,7 @@ class.define_method(Array, "[]=", function(state: State, argc: number)
     end
     
     if argc == 1 then
-        local val = self.value.array[idx.value.number] or value.autocast(nil)
+        local val = self.value.array[idx.value.number] or value.nil_value
         state.set_register(0, val)
         return
     end
@@ -136,7 +136,7 @@ class.define_method(Array, "count", function(state: State, argc: number)
     local self = state.get_register(0)
     assert(self.type == "array")
 
-    state.set_register(0, value.autocast(#self.value.array, "integer"))
+    state.set_register(0, value.tointeger(#self.value.array))
 end)
 class.alias_method(Array, "length", "count")
 class.alias_method(Array, "size", "count")

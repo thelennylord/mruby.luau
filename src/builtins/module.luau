@@ -2,7 +2,6 @@
 local class = require("class")
 local types = require("types")
 local value = require("value")
-local symbol = require("symbol")
 local exception = require("exception")
 
 type VM = types.VM
@@ -23,17 +22,16 @@ class.define_method(Module, "attr_reader", function(state: State, argc: number)
         if val.type == "string" then
             attr_name = val.value.str
         elseif val.type == "symbol" then
-            attr_name = symbol.symid_to_str(val.value.sym_id) :: string
+            attr_name = val.value.symbol
         else
             exception.raise(state.vm, exception.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
             return
         end
     
-        local sym_id = symbol.str_to_symid(attr_name)
         class.define_method(self.value, attr_name, function(state: State, argc: number)
             local self = state.get_register(0)
     
-            state.set_register(0, self.value.ivar[sym_id] or value.autocast(nil))
+            state.set_register(0, self.value.ivar[attr_name] or value.nil_value)
         end)
     end
 end)
@@ -49,17 +47,16 @@ class.define_method(Module, "attr_writer", function(state: State, argc: number)
         if val.type == "string" then
             attr_name = val.value.str
         elseif val.type == "symbol" then
-            attr_name = symbol.symid_to_str(val.value.sym_id) :: string
+            attr_name = val.value.symbol
         else
             exception.raise(state.vm, exception.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
             return
         end
     
-        local sym_id = symbol.str_to_symid(attr_name)
         class.define_method(self.value, attr_name .. "=", function(state: State, argc: number)
             local self = state.get_register(0)
     
-            self.value.ivar[sym_id] = state.get_register(i) or value.autocast(nil)
+            self.value.ivar[attr_name] = state.get_register(i) or value.nil_value
         end)
     end
 end)
@@ -75,23 +72,23 @@ class.define_method(Module, "attr_accessor", function(state: State, argc: number
         if val.type == "string" then
             attr_name = val.value.str
         elseif val.type == "symbol" then
-            attr_name = symbol.symid_to_str(val.value.sym_id) :: string
+            attr_name = val.value.symbol
         else
             exception.raise(state.vm, exception.TypeError, `#<{val.value.class.name}:{tostring(val):sub(8)}> is not a symbol nor a string`)
             return
         end
     
-        local sym_id = symbol.str_to_symid("@" .. attr_name)
+        local sym_id = "@" .. attr_name
         class.define_method(self.value, attr_name, function(state: State, argc: number)
             local self = state.get_register(0)
     
-            state.set_register(0, self.value.ivar[sym_id] or value.autocast(nil))
+            state.set_register(0, self.value.ivar[sym_id] or value.nil_value)
         end)
         
         class.define_method(self.value, attr_name .. "=", function(state: State, argc: number)
             local self = state.get_register(0)
     
-            self.value.ivar[sym_id] = state.get_register(i) or value.autocast(nil)
+            self.value.ivar[sym_id] = state.get_register(i) or value.nil_value
         end)
     end
 end)

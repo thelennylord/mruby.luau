@@ -1,6 +1,5 @@
 --!strict
 local types = require("types")
-local symbol = require("symbol")
 local class = require("class")
 
 type Exception = types.Exception
@@ -18,8 +17,8 @@ local function sub_exception_new(vm: VM, exc_class: Class): Exception
     -- TODO: verify if the modification works
     for i = #vm.callinfo_stack, 1, -1 do        
         local callinfo = vm.callinfo_stack[i]
-        local method_id = callinfo.method_id or 0
-        table.insert(obj.call_nest, method_id)
+        local method_sym = callinfo.method_sym or "?"
+        table.insert(obj.call_nest, method_sym)
     end
 
     return obj
@@ -42,7 +41,7 @@ local function raise(vm: VM, exc_class: Class, message: string)
         local class = exc_class -- TODO Add RuntimeError class here
         vm.exception = exception_new(vm, class, message)
     else
-        print(`Exception: {message or symbol.symid_to_str(exc_class.sym_id)} ({symbol.symid_to_str(exc_class.sym_id)})`)
+        print(`Exception: {message or exc_class.sym} ({exc_class.sym})`)
     end
 end
 
@@ -52,7 +51,7 @@ local function print_exception(val: Value)
     end
 
     local exc = val.value
-    local name = symbol.symid_to_str(exc.class.sym_id)
+    local name = exc.class.sym
 
     print(`Exception: {exc.message or name} ({name})`)
 end
@@ -63,17 +62,17 @@ local function print_exception_vm(vm: VM)
     end
 
     local exc = vm.exception.value
-    local name = symbol.symid_to_str(exc.class.sym_id)
+    local name = exc.class.sym
 
     local str = `Exception:`
-    if exc.method_id then
-        str ..= ` in \`{symbol.symid_to_str(exc.method_id)}'`
+    if exc.method_sym then
+        str ..= ` in \`{exc.method_sym}'`
     end
 
     str ..= ` {exc.message or name} ({name})\n`
 
     for _, v in exc.call_nest do
-        str ..= `    in \`{symbol.symid_to_str(v)}'`
+        str ..= `    in \`{v}'`
     end
 
     print(str)

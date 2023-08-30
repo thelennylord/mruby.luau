@@ -21,7 +21,7 @@ class.define_method(NilClass, "&", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(false))
+    state.set_register(0, value.false_value)
 end)
 
 class.define_method(NilClass, "=~", function(state: State, argc: number)
@@ -30,7 +30,7 @@ class.define_method(NilClass, "=~", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(nil))
+    state.set_register(0, value.nil_value)
 end)
 
 class.define_method(NilClass, "^", function(state: State, argc: number)
@@ -41,11 +41,11 @@ class.define_method(NilClass, "^", function(state: State, argc: number)
 
     local val1 = state.get_register(1)
     if val1.type == "nil" or val1.type == "false" then
-        state.set_register(0, value.autocast(false))
+        state.set_register(0, value.false_value)
         return
     end
 
-    state.set_register(0, value.autocast(true))
+    state.set_register(0, value.true_value)
 end)
 
 class.alias_method(NilClass, "|", "^")
@@ -55,11 +55,8 @@ class.define_method(NilClass, "inspect", function(state: State, argc: number)
         exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
         return
     end
-
-    local ret = class.instance_new(class.builtins.String);
-    (ret.value :: String).str = "nil"
-
-    state.set_register(0, ret)
+    
+    state.set_register(0, value.tostr("nil"))
 end)
 
 class.alias_method(NilClass, "to_s", "inspect")
@@ -70,7 +67,7 @@ class.define_method(NilClass, "nil?", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(true))
+    state.set_register(0, value.true_value)
 end)
 
 class.define_method(NilClass, "to_a", function(state: State, argc: number)
@@ -103,7 +100,7 @@ class.define_method(NilClass, "to_i", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(0, "integer"))
+    state.set_register(0, value.tointeger(0))
 end)
 
 class.define_method(NilClass, "to_f", function(state: State, argc: number)
@@ -112,7 +109,7 @@ class.define_method(NilClass, "to_f", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(0, "float"))
+    state.set_register(0, value.tofloat(0))
 end)
 
 return {}

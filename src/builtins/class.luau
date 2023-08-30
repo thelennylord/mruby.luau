@@ -1,7 +1,6 @@
 --!strict
 local types = require("types")
 local class = require("class")
-local symbol = require("symbol")
 local exception = require("exception")
 local value= require("value")
 
@@ -20,7 +19,7 @@ class.define_method(Class, "new", function(state: State, argc: number)
     state.set_register(0, class.instance_new(cls))
 
     local offset = state.current_self_idx - state.vm.current_callinfo.self_reg_idx
-    state.vm:send_by_name(symbol.str_to_symid("initialize"), offset + 0, argc)
+    state.vm:send_by_name("initialize", offset + 0, argc)
 end)
 
 class.define_method(Class, "allocate", function(state: State, argc: number)
@@ -77,7 +76,7 @@ class.define_method(Class, "superclass", function(state: State, argc: number)
         return
     end
 
-    state.set_register(0, value.autocast(nil))
+    state.set_register(0, value.nil_value)
 end)
 
 Class.methods = Class.definitions
