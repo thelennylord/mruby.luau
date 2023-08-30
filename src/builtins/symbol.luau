@@ -1,7 +1,7 @@
 --!strict
-local types = require("types")
 local class = require("class")
 local exception = require("exception")
+local types = require("types")
 local value = require("value")
 
 type VM = types.VM
@@ -16,25 +16,25 @@ type SymbolValue = types.SymbolValue
 local Symbol = class.define_class(nil, "Symbol", nil :: any)
 
 class.define_method(Symbol, "inspect", function(state: State, argc: number)
-    if argc > 0 then
-        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
-        return
-    end
+	if argc > 0 then
+		exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
+		return
+	end
 
-    local self = state.get_register(0) :: SymbolValue
+	local self = state.get_register(0) :: SymbolValue
 
-    state.set_register(0, value.tostr(":" .. self.value.symbol))
+	state.set_register(0, value.tostr(":" .. self.value.symbol))
 end)
 
 class.define_method(Symbol, "to_s", function(state: State, argc: number)
-    if argc > 0 then
-        exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
-        return
-    end
+	if argc > 0 then
+		exception.raise(state.vm, exception.ArgumentError, `wrong number of arguments (given {argc}, expected 0)`)
+		return
+	end
 
-    local self = state.get_register(0) :: SymbolValue
+	local self = state.get_register(0) :: SymbolValue
 
-    state.set_register(0, value.tostr(self.value.symbol))
+	state.set_register(0, value.tostr(self.value.symbol))
 end)
 
 return {}

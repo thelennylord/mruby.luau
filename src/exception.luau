@@ -1,6 +1,6 @@
 --!strict
-local types = require("types")
 local class = require("class")
+local types = require("types")
 
 type Exception = types.Exception
 type VM = types.VM
@@ -9,73 +9,73 @@ type Value = types.Value
 type ExceptionValue = types.ExceptionValue
 
 local function sub_exception_new(vm: VM, exc_class: Class): Exception
-    assert(exc_class ~= nil)
+	assert(exc_class ~= nil)
 
-    local val = class.instance_new(exc_class)
-    local obj = val.value :: Exception
-    
-    -- TODO: verify if the modification works
-    for i = #vm.callinfo_stack, 1, -1 do        
-        local callinfo = vm.callinfo_stack[i]
-        local method_sym = callinfo.method_sym or "?"
-        table.insert(obj.call_nest, method_sym)
-    end
+	local val = class.instance_new(exc_class)
+	local obj = val.value :: Exception
 
-    return obj
+	-- TODO: verify if the modification works
+	for i = #vm.callinfo_stack, 1, -1 do
+		local callinfo = vm.callinfo_stack[i]
+		local method_sym = callinfo.method_sym or "?"
+		table.insert(obj.call_nest, method_sym)
+	end
+
+	return obj
 end
 
 local function exception_new(vm: VM, exc_class: Class, message: string): Value
-    local ex = sub_exception_new(vm, exc_class)
-    local ex_val: ExceptionValue = {
-        type = "exception",
-        value = ex
-    }
+	local ex = sub_exception_new(vm, exc_class)
+	local ex_val: ExceptionValue = {
+		type = "exception",
+		value = ex,
+	}
 
-    ex.message = message or "Exception"
+	ex.message = message or "Exception"
 
-    return ex_val
+	return ex_val
 end
 
 local function raise(vm: VM, exc_class: Class, message: string)
-    if vm ~= nil then
-        local class = exc_class -- TODO Add RuntimeError class here
-        vm.exception = exception_new(vm, class, message)
-    else
-        print(`Exception: {message or exc_class.sym} ({exc_class.sym})`)
-    end
+	if vm ~= nil then
+		local class = exc_class -- TODO Add RuntimeError class here
+		vm.exception = exception_new(vm, class, message)
+	else
+		print(`Exception: {message or exc_class.sym} ({exc_class.sym})`)
+	end
 end
 
 local function print_exception(val: Value)
-    if val.type ~= "exception" then
-        return
-    end
+	if val.type ~= "exception" then
+		return
+	end
 
-    local exc = val.value
-    local name = exc.class.sym
+	local exc = val.value
+	local name = exc.class.sym
 
-    print(`Exception: {exc.message or name} ({name})`)
+	print(`Exception: {exc.message or name} ({name})`)
 end
 
 local function print_exception_vm(vm: VM)
-    if vm.exception.type ~= "exception" then
-        return
-    end
+	if vm.exception.type ~= "exception" then
+		return
+	end
 
-    local exc = vm.exception.value
-    local name = exc.class.sym
+	local exc = vm.exception.value
+	local name = exc.class.sym
 
-    local str = `Exception:`
-    if exc.method_sym then
-        str ..= ` in \`{exc.method_sym}'`
-    end
+	local str = `Exception:`
+	if exc.method_sym then
+		str ..= ` in \`{exc.method_sym}'`
+	end
 
-    str ..= ` {exc.message or name} ({name})\n`
+	str ..= ` {exc.message or name} ({name})\n`
 
-    for _, v in exc.call_nest do
-        str ..= `    in \`{v}'`
-    end
+	for _, v in exc.call_nest do
+		str ..= `    in \`{v}'`
+	end
 
-    print(str)
+	print(str)
 end
 
 local export: { [string]: any } = {}
