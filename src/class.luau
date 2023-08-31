@@ -1,6 +1,6 @@
 --!strict
-local global = require("global")
-local types = require("types")
+local global = require("src/global")
+local types = require("src/types")
 
 type Class = types.Class
 type VM = types.VM

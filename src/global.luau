@@ -1,6 +1,6 @@
 -- Constant and global variable store
-local symbol = require("symbol")
-local types = require("types")
+local symbol = require("src/symbol")
+local types = require("src/types")
 
 type Class = types.Class
 type Value = types.Value

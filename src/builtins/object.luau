@@ -1,8 +1,8 @@
 --!strict
 -- Object class
-local class = require("class")
-local types = require("types")
-local value = require("value")
+local class = require("src/class")
+local types = require("src/types")
+local value = require("src/value")
 
 type LuaMethod = types.LuaMethod
 type VM = types.VM

@@ -1,6 +1,6 @@
 --!strict
-local class = require("class")
-local types = require("types")
+local class = require("src/class")
+local types = require("src/types")
 
 type Exception = types.Exception
 type VM = types.VM

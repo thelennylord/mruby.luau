@@ -1,7 +1,7 @@
 --!strict
-local class = require("class")
-local types = require("types")
-local value = require("value")
+local class = require("src/class")
+local types = require("src/types")
+local value = require("src/value")
 
 type VM = types.VM
 type Value = types.Value

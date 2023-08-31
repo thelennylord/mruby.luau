@@ -1,5 +1,5 @@
 --!strict
-local types = require("types")
+local types = require("src/types")
 
 type ByteStream = types.ByteStream
 type Proc = types.Proc

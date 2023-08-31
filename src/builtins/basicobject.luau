@@ -1,9 +1,9 @@
 --!strict
 -- Object class
-local class = require("class")
-local exception = require("exception")
-local types = require("types")
-local value = require("value")
+local class = require("src/class")
+local exception = require("src/exception")
+local types = require("src/types")
+local value = require("src/value")
 
 type State = types.State
 type Class = types.Class
