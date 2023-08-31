@@ -11,7 +11,7 @@ type VM = types.VM
 local function execute_bytecode(byte_string: string, debug: boolean)
     local irep: IREP = loader.load_bytecode(byte_string, debug)
 
-    local vm: VM = VM.new()
+    local vm: VM = VM.new(debug)
     vm:load(byte_string, irep)
     vm:run()
 end
