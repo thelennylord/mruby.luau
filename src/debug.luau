@@ -3,6 +3,7 @@ local opcodes = require("src/opcodes")
 local types = require("src/types")
 
 type ByteStream = types.ByteStream
+type Value = types.Value
 type Instruction = {
 	opcode: number,
 	operand: { number },
@@ -129,6 +130,31 @@ local function print_irep(reader: ByteStream, irep: types.IREP, level: number, i
 	end
 end
 
+local function obj_rep(obj: Value): string
+	if obj.type == "integer" or obj.type == "float" then
+		return tostring(obj.value.number)
+
+	elseif obj.type == "true" then
+		return "true"
+
+	elseif obj.type == "false" then
+		return "false"
+
+	elseif obj.type == "symbol" then
+		return ":" .. obj.value.symbol
+
+	elseif obj.type == "class" then
+		return obj.value.name .. ":Class"
+
+	elseif obj.type == "nil" then
+		return "nil"
+		
+	end
+
+	return `#<{obj.value.class.name}:{string.sub(tostring(obj.value), #"table: " + 1)}>`
+end
+
 return {
 	print_irep = print_irep,
+	obj_rep = obj_rep
 }

@@ -5,6 +5,7 @@ local global = require("src/global")
 local opcodes = require("src/opcodes")
 local types = require("src/types")
 local value = require("src/value")
+local debuglib = require("src/debug")
 
 -- Require definitions of the built-in classes
 require("src/builtins/basic_object")
@@ -639,7 +640,7 @@ local function op_getiv(vm: VM)
 	local sym_id = vm.current_callinfo.irep.symbols[B + 1]
 	local self = vm:get_self()
 
-	vm:set_register(A, self.value.ivar[sym_id])
+	vm:set_register(A, self.value.ivar[sym_id] or value.nil_value)
 end
 
 -- ivset(Syms[b], R[a])
@@ -2226,13 +2227,7 @@ function VM.run(vm: VM)
 		if vm.debug_mode then
 			print(`registers (after executing): (-> {vm.current_callinfo.self_reg_idx})`)
 			for i, v in vm.registers do
-				print(
-					`  {i} = {if v.type == "object"
-						then `#<{v.value.class.name}:{string.sub(tostring(v.value), #"table: " + 1)}>`
-						elseif v.type == "class" then v.value.name
-						elseif v.type == "integer" then `int({v.value})`
-						else v.type}`
-				)
+				print(`  R[{i}]: {debuglib.obj_rep(v :: any)}`)
 			end
 			print("")
 		end
@@ -2261,7 +2256,7 @@ function VM.run(vm: VM)
 			-- We reached the end and couldn't find a catch handler
 			if #vm.callinfo_stack == 0 then
 				exception.print(vm.exception)
-				error(`\n\nAn exception occurred while executing; refer to the message above for more information`)
+				error(`An exception occurred while executing; refer to the message above for more information`)
 			end
 
 			vm:exit_callinfo()
