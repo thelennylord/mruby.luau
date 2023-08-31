@@ -7,7 +7,7 @@ local types = require("src/types")
 local value = require("src/value")
 
 -- Require definitions of the built-in classes
-require("src/builtins/basicobject")
+require("src/builtins/basic_object")
 require("src/builtins/object")
 require("src/builtins/array")
 require("src/builtins/exception")
