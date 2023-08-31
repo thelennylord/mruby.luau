@@ -1,5 +1,6 @@
 --!strict
 local types = require("src/types")
+local ByteStream = require("src/stream")
 
 type ByteStream = types.ByteStream
 type Proc = types.Proc
@@ -134,7 +135,8 @@ local function read_irep(reader: ByteStream, debug: boolean): IREP
 	return irep
 end
 
-local function load_bytecode(reader: ByteStream, debug: boolean): IREP
+local function load_bytecode(byte_string: string, debug: boolean): IREP
+	local reader: ByteStream = ByteStream.new(byte_string)
 	read_binary_header(reader)
 
 	return read_irep(reader, debug)

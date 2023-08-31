@@ -145,6 +145,9 @@ export type VM = {
 	ensure_state: VMEnsure,
 
 	-- Methods
+	load: (self: VM, inst: string, irep: IREP) -> (),
+	run: (self: VM) -> (),
+	
 	-- Gets the register relative to current_reg (Indexing begins from 1 just like lua)
 	get_register: (self: VM, register: number) -> Value,
 	set_register: (self: VM, register: number, value: Value) -> (),
