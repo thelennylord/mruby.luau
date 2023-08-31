@@ -13,7 +13,7 @@ type Class = types.Class
 type Array = types.Array
 type Hash = types.Hash
 
-local NilClass = class.define_class(nil, "NilClass", nil :: any)
+local NilClass = class.define_class("NilClass", nil :: any)
 
 class.define_method(NilClass, "&", function(state: State, argc: number)
 	if argc > 1 or argc == 0 then

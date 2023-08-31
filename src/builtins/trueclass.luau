@@ -11,7 +11,7 @@ type State = types.State
 type String = types.String
 type Class = types.Class
 
-local TrueClass = class.define_class(nil, "TrueClass", nil :: any)
+local TrueClass = class.define_class("TrueClass", nil :: any)
 
 class.define_method(TrueClass, "&", function(state: State, argc: number)
 	if argc > 1 or argc == 0 then

@@ -9,7 +9,7 @@ type String = types.String
 type FloatValue = types.FloatValue
 type StringValue = types.StringValue
 
-local Float = class.define_class(nil, "Float", nil :: any)
+local Float = class.define_class("Float", nil :: any)
 
 class.define_method(Float, "zero?", function(state: State, argc: number)
 	if argc > 0 then

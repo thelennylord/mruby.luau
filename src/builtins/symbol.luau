@@ -13,7 +13,7 @@ type Class = types.Class
 type SymbolValue = types.SymbolValue
 
 -- TODO Symbol class
-local Symbol = class.define_class(nil, "Symbol", nil :: any)
+local Symbol = class.define_class("Symbol", nil :: any)
 
 class.define_method(Symbol, "inspect", function(state: State, argc: number)
 	if argc > 0 then

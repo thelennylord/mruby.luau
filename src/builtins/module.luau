@@ -9,7 +9,7 @@ type Value = types.Value
 type State = types.State
 type Class = types.Class
 
-local Module = class.define_class(nil, "Module", nil :: any)
+local Module = class.define_class("Module", nil :: any)
 
 class.define_method(Module, "attr_reader", function(state: State, argc: number)
 	local self = state.get_register(0)

@@ -9,7 +9,7 @@ type Value = types.Value
 type Array = types.Array
 type State = types.State
 
-local Array = class.define_class(nil, "Array", nil :: any)
+local Array = class.define_class("Array", nil :: any)
 
 class.define_method(Array, "initialize", function(state: State, argc: number)
 	local self = state.get_register(0)

@@ -9,7 +9,7 @@ type String = types.String
 type IntegerValue = types.IntegerValue
 type StringValue = types.StringValue
 
-local Integer = class.define_class(nil, "Integer", nil :: any)
+local Integer = class.define_class("Integer", nil :: any)
 
 class.define_method(Integer, "zero?", function(state: State, argc: number)
 	if argc > 0 then

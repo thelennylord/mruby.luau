@@ -109,7 +109,7 @@ global.consts.set(Class.sym, {
 	value = Class,
 })
 
-local function define_class_under(vm: VM, outer: Class, name: string, super: Class): Class
+local function define_class_under(outer: Class, name: string, super: Class): Class
 	assert(outer ~= nil)
 	assert(name ~= nil)
 
@@ -147,14 +147,8 @@ local function define_class_under(vm: VM, outer: Class, name: string, super: Cla
 	return class
 end
 
-local function define_class(vm: VM?, name: string, super: Class): Class
+local function define_class(name: string, super: Class): Class
 	assert(name ~= nil)
-
-	-- if vm ~= nil and vm:get_register(0).type == "class" then
-	--     assert(vm.target_class == vm:get_register(0).value)
-
-	--     return define_class_under(vm, vm.target_class, name, super)
-	-- end
 
 	local val = global.consts.get(name)
 	if val ~= nil then
@@ -195,18 +189,18 @@ local BUILTIN_CLASSES: { [string]: Class } = {
 	Object = Object,
 	Module = Module,
 	Class = Class,
-	Exception = define_class(nil, "Exception", Object),
-	FalseClass = define_class(nil, "FalseClass", Object),
-	TrueClass = define_class(nil, "TrueClass", Object),
-	NilClass = define_class(nil, "NilClass", Object),
-	Integer = define_class(nil, "Integer", Object),
-	Float = define_class(nil, "Float", Object),
-	String = define_class(nil, "String", Object),
-	Proc = define_class(nil, "Proc", Object),
-	Range = define_class(nil, "Range", Object),
-	Array = define_class(nil, "Array", Object),
-	Hash = define_class(nil, "Hash", Object),
-	Symbol = define_class(nil, "Symbol", Object),
+	Exception = define_class("Exception", Object),
+	FalseClass = define_class("FalseClass", Object),
+	TrueClass = define_class("TrueClass", Object),
+	NilClass = define_class("NilClass", Object),
+	Integer = define_class("Integer", Object),
+	Float = define_class("Float", Object),
+	String = define_class("String", Object),
+	Proc = define_class("Proc", Object),
+	Range = define_class("Range", Object),
+	Array = define_class("Array", Object),
+	Hash = define_class("Hash", Object),
+	Symbol = define_class("Symbol", Object),
 }
 
 local function get_class(obj: Object): Class

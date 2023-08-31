@@ -8,7 +8,7 @@ type Value = types.Value
 type Hash = types.Hash
 type State = types.State
 
-local Hash = class.define_class(nil, "Hash", nil :: any)
+local Hash = class.define_class("Hash", nil :: any)
 
 class.define_method(Hash, "initialize", function(state: State, argc: number)
 	if argc ~= 0 then

@@ -9,7 +9,7 @@ type State = types.State
 type Class = types.Class
 
 -- An empty class of BasicObject was already pre-defined in class.luau
-local BasicObject = class.define_class(nil, "BasicObject", nil :: any)
+local BasicObject = class.define_class("BasicObject", nil :: any)
 class.define_method(BasicObject, "initialize", function(state: State, argc: number) end)
 
 class.define_method(BasicObject, "__id__", function(state: State, argc: number)

@@ -4,7 +4,7 @@ local exception = require("src/exception")
 local types = require("src/types")
 local value = require("src/value")
 
-local Class = class.define_class(nil, "Class", nil :: any)
+local Class = class.define_class("Class", nil :: any)
 
 type State = types.State
 type VM = types.VM

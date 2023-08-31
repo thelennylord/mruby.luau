@@ -15,7 +15,7 @@ type CallInfo = types.CallInfo
 type ClassValue = types.ClassValue
 
 -- An empty class of Object was already pre-defined in class.luau
-local Object = class.define_class(nil, "Object", nil :: any)
+local Object = class.define_class("Object", nil :: any)
 
 -- Methods
 class.define_method(Object, "!=", function(state: State, argc: number)

@@ -1944,9 +1944,9 @@ local function op_class(vm: VM)
 
 	local new_class: Class
 	if outer.type == "class" then
-		new_class = class.define_class_under(vm, outer.value, class_name, super)
+		new_class = class.define_class_under(outer.value, class_name, super)
 	else
-		new_class = class.define_class(vm, class_name, super)
+		new_class = class.define_class(class_name, super)
 	end
 
 	vm:set_register(A, {
@@ -1965,9 +1965,9 @@ local function op_module(vm: VM)
 
 	local new_module: Class
 	if outer.type == "class" then
-		new_module = class.define_class_under(vm, outer.value, module_name, class.builtins.Module)
+		new_module = class.define_class_under(outer.value, module_name, class.builtins.Module)
 	else
-		new_module = class.define_class(vm, module_name, class.builtins.Module)
+		new_module = class.define_class(module_name, class.builtins.Module)
 	end
 
 	new_module.is_module = true

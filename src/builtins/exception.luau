@@ -9,7 +9,7 @@ type State = types.State
 type Class = types.Class
 type String = types.String
 
-local Exception = class.define_class(nil, "Exception", nil :: any)
+local Exception = class.define_class("Exception", nil :: any)
 
 class.define_method(Exception, "initialize", function(state: State, argc: number)
 	local val1 = state.get_register(0)

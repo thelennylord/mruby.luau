@@ -7,7 +7,7 @@ type IREP = types.IREP
 type Proc = types.Proc
 type State = types.State
 
-local Proc = class.define_class(nil, "Proc", nil :: any)
+local Proc = class.define_class("Proc", nil :: any)
 
 class.define_method(Proc, "initialize", function(state: State, argc: number)
 	error("Proc intialization not implemented")

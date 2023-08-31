@@ -9,7 +9,7 @@ type String = types.String
 type Value = types.Value
 type State = types.State
 
-local String = class.define_class(nil, "String", nil :: any)
+local String = class.define_class("String", nil :: any)
 
 class.define_method(String, "initialize", function(state: State, argc: number)
 	local val = state.get_register(0)

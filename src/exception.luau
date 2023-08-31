@@ -67,17 +67,17 @@ export.new = exception_new
 export.print = print_exception_vm
 
 -- Export built-in Exception classes
-export.NoMemoryError = class.define_class(nil, "NoMemoryError", class.builtins.Exception)
-export.NotImplementedError = class.define_class(nil, "NotImplementedError", class.builtins.Exception)
-export.StandardError = class.define_class(nil, "StandardError", class.builtins.Exception)
-export.ArgumentError = class.define_class(nil, "ArgumentError", export.StandardError)
-export.IndexError = class.define_class(nil, "IndexError", export.StandardError)
-export.NameError = class.define_class(nil, "NameError", export.StandardError)
-export.NoMethodError = class.define_class(nil, "NoMethodError", export.NameError)
-export.RangeError = class.define_class(nil, "RangeError", export.StandardError)
-export.RuntimeError = class.define_class(nil, "RuntimeError", export.StandardError)
-export.TypeError = class.define_class(nil, "TypeError", export.StandardError)
-export.LocalJumpError = class.define_class(nil, "LocalJumpError", export.StandardError)
-export.ZeroDivisionError = class.define_class(nil, "ZeroDivisionError", export.StandardError)
+export.NoMemoryError = class.define_class("NoMemoryError", class.builtins.Exception)
+export.NotImplementedError = class.define_class("NotImplementedError", class.builtins.Exception)
+export.StandardError = class.define_class("StandardError", class.builtins.Exception)
+export.ArgumentError = class.define_class("ArgumentError", export.StandardError)
+export.IndexError = class.define_class("IndexError", export.StandardError)
+export.NameError = class.define_class("NameError", export.StandardError)
+export.NoMethodError = class.define_class("NoMethodError", export.NameError)
+export.RangeError = class.define_class("RangeError", export.StandardError)
+export.RuntimeError = class.define_class("RuntimeError", export.StandardError)
+export.TypeError = class.define_class("TypeError", export.StandardError)
+export.LocalJumpError = class.define_class("LocalJumpError", export.StandardError)
+export.ZeroDivisionError = class.define_class("ZeroDivisionError", export.StandardError)
 
 return export
