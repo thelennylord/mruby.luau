@@ -48,13 +48,14 @@ end
 local function print_exception_vm(exc: Exception)
 	local name = exc.class.sym
 
-	local str = `Exception: in \`{exc.method_sym}': {exc.message or name} ({name})\n`
+	print(`Exception: {exc.message or name} ({name})`)
+	print(`    in \`{exc.method_sym}'`)
 
 	for _, v in exc.call_nest do
-		str ..= `    in \`{v}'`
+		print(`    in \`{v}'`)
 	end
 
-	print(str)
+	print()
 end
 
 local export: { [string]: any } = {}
