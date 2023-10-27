@@ -114,6 +114,7 @@ export type CallInfo = {
 	inst_cursor_pos: number,
 	self_reg_idx: number,
 	target_class: Class,
+	return_to: CallInfo?,
 	dead: boolean,
 
 	arg_count: number,
@@ -141,12 +142,14 @@ export type VM = {
 
 	callinfo_stack: { CallInfo },
 	current_callinfo: CallInfo,
+	should_next: boolean,
 
 	ensure_state: VMEnsure,
 
 	-- Methods
 	load: (self: VM, inst: string, irep: IREP) -> (),
 	run: (self: VM) -> (),
+	execute: (self: VM) -> (),
 	
 	-- Gets the register relative to current_reg (Indexing begins from 1 just like lua)
 	get_register: (self: VM, register: number) -> Value,

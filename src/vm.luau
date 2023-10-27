@@ -293,7 +293,7 @@ function VM.send_by_name(vm: VM, sym: string, A: number, C: number, call_super: 
 			vm.exception.method_sym = vm.current_callinfo.method_sym
 		end
 
-		return
+		return nil
 	end
 
 	if method.type == "luafunc" then
@@ -342,6 +342,35 @@ function VM.send_by_name(vm: VM, sym: string, A: number, C: number, call_super: 
 	)
 	callinfo.self_class = cls
 	callinfo.super_called = call_super
+
+	vm:execute()
+
+	--blabla test
+	if vm.exception then
+		local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
+		if handler then
+			vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
+			return
+		end
+
+		-- Pop callinfo as we cannot continue due to an exception, let the parent callinfo handle it
+		vm:exit_callinfo()
+		return
+	end
+
+	-- Continue execution
+	if callinfo.return_to == vm.current_callinfo then
+		vm.should_next = true
+		return
+	end
+
+	-- Return and pop callinfo
+	local ret = vm:get_register(A)
+	vm:set_register(0, ret)
+
+	vm.current_callinfo.return_to = callinfo.return_to
+	vm.should_next = false
+	return
 end
 
 function VM.enter_callinfo(
@@ -1197,101 +1226,49 @@ local function op_return(vm: VM)
 	local A = fetch_B(vm)
 
 	-- Jump to ensure if exists
-	do
-		local handler = vm:get_catch_handler("ensure")
-		if handler then
-			vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
-			return
-		end
-	end
-
-	-- Ignore and stop the VM if it's a top level return
-	if #vm.callinfo_stack == 0 then
-		vm.should_stop = true
+	local handler = vm:get_catch_handler("ensure")
+	if handler then
+		vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
 		return
 	end
 
-	local callinfo = vm.current_callinfo
+	-- Set return value
+	local ret = vm:get_register(A)
+	vm:set_register(0, ret)
 
-	if vm.ensure_state.ensuring then
-		-- Handle different cases for an explicit and implicit return in an ensure block
-		-- The last instruction of a callinfo (aka OP_RETURN) is an implicit return
-		if vm.pc == callinfo.irep.num_instructions then
-			-- Implicit return
-			while vm.ensure_state.target_callinfo ~= vm.current_callinfo do
-				vm:exit_callinfo()
-
-				local handler = vm:get_catch_handler("ensure")
-				if handler then
-					vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
-					return
-				end
-			end
-
-			vm:set_register(0, vm.ensure_state.return_value)
-			vm:exit_callinfo()
-		else
-			-- Explicit return
-			vm.ensure_state.ensuring = false
-			vm.ensure_state.target_callinfo = nil :: any
-			vm.ensure_state.return_value = nil :: any
-		end
-	end
-
-	-- Ignore initialize method's return as that always returns a new object of a Class (internally done via a lua function)
-	if callinfo.method_sym ~= "initialize" then
-		local ret = vm:get_register(A)
-		vm:set_register(0, ret)
-	end
+	-- Set return callinfo to the previous callinfo
+	vm.current_callinfo.return_to = vm.callinfo_stack[#vm.callinfo_stack]
 
 	vm:exit_callinfo()
+	vm.should_next = false
 end
 
 -- return R[a] (in-block return)
 -- Operands: B
 local function op_return_blk(vm: VM)
 	local A = fetch_B(vm)
-	local ret = vm:get_register(A)
 
+	local ret = vm:get_register(A)
 	local self = vm:get_register(0)
 
 	assert(self.type == "proc", `instruction OP_RETURN_BLK should be in a block`)
-	local proc = self.value
-
-	if vm.ensure_state.ensuring then
-		-- The instruction should stop carrying forward return values from
-		-- previous OP_BREAK and OP_RETURN_BLK, so we disable the ensure state
-
-		vm.ensure_state.ensuring = false
-		vm.ensure_state.target_callinfo = nil :: any
-		vm.ensure_state.return_value = nil :: any
-	end
-
-	if proc.embracing_callinfo.dead then
-		-- TODO Make the error message more clear
-		exception.raise(vm, exception.LocalJumpError, `unexpected return`)
+	
+	-- Jump to ensure if exists
+	local handler = vm:get_catch_handler("ensure")
+	if handler then
+		vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
 		return
 	end
+	
+	local proc = self.value
+	assert(proc.caller_callinfo ~= nil)
 
-	-- Go back to the level where the proc was generated
-	while proc.embracing_callinfo ~= vm.current_callinfo do
-		-- Be sure to jump to ensures
-		local handler = vm:get_catch_handler("ensure")
-		if handler then
-			vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
-
-			-- Enable the ensure state so the return value can carry forward
-			vm.ensure_state.ensuring = true
-			vm.ensure_state.return_value = ret
-			vm.ensure_state.target_callinfo = proc.embracing_callinfo
-			return
-		end
-
-		vm:exit_callinfo()
-	end
-
+	vm.current_callinfo.return_to = proc.caller_callinfo
+	
 	vm:set_register(0, ret)
 	vm:exit_callinfo()
+
+	vm.should_next = false
 end
 
 -- break R[a]
@@ -1310,51 +1287,19 @@ local function op_break(vm: VM)
 	local proc = self.value
 	assert(proc.caller_callinfo ~= nil)
 
-	if proc.type ~= "lambda" and proc.caller_callinfo.dead then
-		exception.raise(vm, exception.LocalJumpError, `break from proc-closure`)
-		return
-	end
-
-	if vm.ensure_state.ensuring then
-		-- The instruction should stop carrying forward return values from
-		-- previous OP_BREAK and OP_RETURN_BLK, so we disable the ensure state
-
-		vm.ensure_state.ensuring = false
-		vm.ensure_state.target_callinfo = nil :: any
-		vm.ensure_state.return_value = nil :: any
-	end
-
-	-- If it's lambda, treat OP_BREAK as OP_RETURN
+	-- Jump to ensure if exists
 	local handler = vm:get_catch_handler("ensure")
-	if proc.type == "lambda" then
-		if handler then
-			vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
-		else
-			vm:set_register(0, ret)
-			vm:exit_callinfo()
-		end
-
+	if handler then
+		vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
 		return
 	end
 
-	-- Loop for handling ensure
-	while proc.caller_callinfo ~= vm.current_callinfo do
-		handler = vm:get_catch_handler("ensure")
-		if handler then
-			vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
-
-			-- Enable the ensure state so the return value can carry forward
-			vm.ensure_state.ensuring = true
-			vm.ensure_state.return_value = ret
-			vm.ensure_state.target_callinfo = proc.embracing_callinfo
-			return
-		end
-
-		vm:exit_callinfo()
-	end
+	vm.current_callinfo.return_to = proc.caller_callinfo
 
 	vm:set_register(0, ret)
 	vm:exit_callinfo()
+
+	vm.should_next = false
 end
 
 -- R[a] = block (16=m5:r1:m5:d1:lv4)
@@ -1987,7 +1932,33 @@ local function op_exec(vm: VM)
 	assert(val.type == "class")
 
 	local child_irep = vm.current_callinfo.irep.children[B + 1]
-	vm:enter_callinfo(nil, child_irep, val.value, A, 0)
+	
+	local callinfo = vm:enter_callinfo(nil, child_irep, val.value, A, 0)
+	vm:execute()
+
+	if vm.exception then
+		local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
+		if handler then
+			vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
+			return
+		end
+
+		-- Pop callinfo as we cannot continue due to an exception, let the parent callinfo handle it
+		vm:exit_callinfo()
+		return
+	end
+
+	-- Continue execution
+	if callinfo.return_to == vm.current_callinfo then
+		vm.should_next = true
+		return
+	end
+
+	-- Return and pop callinfo
+	local ret = vm:get_register(A)
+	vm:set_register(0, ret)
+
+	vm.current_callinfo.return_to = callinfo.return_to
 end
 
 -- R(a).newmethod(Syms(b),R(a+1)); R(a) = Syms(b)
@@ -2211,48 +2182,38 @@ local op_functions = {
 	op_stop,
 }
 
-function VM.run(vm: VM)
-	while true do
+function VM.execute(vm: VM)
+	-- Luau doesn't support `goto` yet, so make a makeshift goto of sorts.
+	vm.should_next = true
+	while vm.should_next do
 		local inst, _ = string.unpack(">B", vm.inst, vm.pc)
-
+	
 		local opcode = opcodes.opcodes[inst]
 		assert(opcode ~= nil, `unknown opcode {inst}`)
-
+		
+		op_functions[inst](vm)
+		
 		if vm.debug_mode then
 			print(`executing opcode: {opcode}`) -- debug
-		end
-
-		op_functions[inst](vm)
-
-		if vm.debug_mode then
 			print(`registers (after executing): (-> {vm.current_callinfo.self_reg_idx})`)
 			for i, v in vm.registers do
 				print(`  R[{i}]: {debuglib.obj_rep(v :: any)}`)
 			end
 			print("")
 		end
-
-		if vm.should_stop then
-			return
-		end
-
+	
 		if vm.ext ~= 0 then
 			vm.ext = 0
 		end
-
-		if not vm.exception then
-			continue
-		end
-
-		-- Handle exceptions and catch handlers
-		while true do
-			-- We should first search for a rescue, if not then an ensure
+	
+		if vm.exception then
+			-- We should first search for a rescue, then for an ensure
 			local handler = vm:get_catch_handler("rescue") or vm:get_catch_handler("ensure")
 			if handler then
 				vm.pc = vm.current_callinfo.irep.inst_idx + handler.target
-				break
+				continue
 			end
-
+	
 			-- We reached the end and couldn't find a catch handler
 			if #vm.callinfo_stack == 0 then
 				exception.print(vm.exception)
@@ -2260,6 +2221,7 @@ function VM.run(vm: VM)
 			end
 
 			vm:exit_callinfo()
+			break
 		end
 	end
 end

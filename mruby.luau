@@ -13,7 +13,7 @@ local function execute_bytecode(byte_string: string, debug: boolean)
 
     local vm: VM = VM.new(debug)
     vm:load(byte_string, irep)
-    vm:run()
+    vm:execute()
 end
 
 return execute_bytecode
