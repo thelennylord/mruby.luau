@@ -134,7 +134,7 @@ export type VM = {
 	should_stop: boolean,
 	top_irep: IREP,
 	pc: number,
-	inst: string,
+	inst: buffer,
 	ext: number,
 	registers: { Value },
 	exception: Exception?,
@@ -147,7 +147,7 @@ export type VM = {
 	ensure_state: VMEnsure,
 
 	-- Methods
-	load: (self: VM, inst: string, irep: IREP) -> (),
+	load: (self: VM, inst: buffer, irep: IREP) -> (),
 	run: (self: VM) -> (),
 	execute: (self: VM) -> (),
 	

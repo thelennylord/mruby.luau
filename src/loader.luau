@@ -1,21 +1,22 @@
 --!strict
 local types = require("src/types")
-local ByteStream = require("src/stream")
 
-type ByteStream = types.ByteStream
 type Proc = types.Proc
 type IREP = types.IREP
 type CatchHandler = types.CatchHandler
 
-local function read_binary_header(reader: ByteStream)
+local function read_binary_header(buf: buffer)
 	-- TODO Don't use asserts
-	assert(reader:read_string(4) == "RITE")
-	assert(reader:read_string(2) == "03")
+	assert(buffer.readstring(buf, 0, 4) == "RITE")
+	assert(buffer.readstring(buf, 4, 2) == "03")
+
+	-- assert(reader:read_string(4) == "RITE")
+	-- assert(reader:read_string(2) == "03")
 
 	-- Skip minor version as older minor versions are accepted
-	reader:skip(2)
 
-	assert(reader:read_byte(4) == reader:length())
+	assert(buffer.readu32(buf, 8) == buffer.len(buf))
+	--assert(reader:read_byte(4) == reader:length())
 
 	-- Skip the following:
 	-- compiler name
@@ -23,123 +24,124 @@ local function read_binary_header(reader: ByteStream)
 	-- section ident
 	-- section size
 	-- rite version
-	reader:skip(20)
 end
 
-local function read_catch_handlers(reader: ByteStream, length: number): { CatchHandler }
+local function read_catch_handlers(buf: buffer, offset: number, length: number): ({ CatchHandler }, number)
 	local handlers: { CatchHandler } = {}
 
 	while #handlers < length do
-		local catch_type = if reader:read_byte() == 0 then "rescue" else "ensure"
+		local catch_type = if buffer.readu8(buf, offset) == 0 then "rescue" else "ensure"
 
 		local handler: CatchHandler = {
 			type = catch_type :: "rescue" | "ensure",
-			beginning = reader:read_byte(4),
-			ending = reader:read_byte(4),
-			target = reader:read_byte(4),
+			beginning = buffer.readu32(buf, offset + 1),
+			ending = buffer.readu32(buf, offset + 5),
+			target = buffer.readu32(buf, offset + 9),
 		}
 
 		table.insert(handlers, handler)
+		offset += 13
 	end
 
-	return handlers
+	return handlers, offset
 end
 
-local function read_pool(reader: ByteStream, length: number): { boolean | string | number }
+local function read_pool(buf: buffer, offset: number, length: number): ({ boolean | string | number }, number)
 	local pool: { boolean | string | number } = {}
 
 	while #pool < length do
-		local ptype = reader:read_byte()
+		local ptype = buffer.readu8(buf, offset)
+		offset += 1
 
 		-- String
 		if ptype == 0 then
-			local str_len = reader:read_byte(2)
-			table.insert(pool, reader:read_string(str_len))
+			local str_len = buffer.readu16(buf, offset)
+			table.insert(pool, buffer.readstring(buf, offset + 2, str_len))
 
-			-- Skip \0 character (lua doesn't need it)
-			reader:skip(1)
-
+			-- Add 1 to skip NULL character
+			offset += 4 + str_len + 1
+			
 		-- int32
 		elseif ptype == 1 then
-			table.insert(pool, reader:read_byte(4))
+			table.insert(pool, buffer.readi32(buf, offset))
+			offset += 4
 
 		-- int64
 		elseif ptype == 3 then
-			table.insert(pool, reader:read_byte(8))
+			local num, offset = string.unpack(`>I8`, buffer.tostring(buf), offset)
+			table.insert(pool, num)
 
 		-- float/double
 		elseif ptype == 5 then
-			local val = string.unpack("d", reader:read_string(8))
-			table.insert(pool, val)
+			table.insert(pool, buffer.readf64(buf, offset))
+			offset += 8
 
 		-- bigint
 		elseif ptype == 7 then
 			-- TODO Support big int
-			local len = reader:read_byte(2)
-			table.insert(pool, reader:read_string(len))
+			local len = buffer.readu16(buf, offset)
+			table.insert(pool, buffer.readstring(buf, offset + 2, len))
 
 			error("big int isn't supported")
 		end
 	end
 
-	return pool
+	return pool, offset
 end
 
-local function read_syms(reader: ByteStream, length: number): { string }
+local function read_syms(buf: buffer, offset: number, length: number): ({ string }, number)
 	local syms: { string } = {}
 
 	while #syms < length do
-		local len = reader:read_byte(2)
-		local str = reader:read_string(len)
-
-		-- Skip \0
-		reader:skip(1)
+		local len = buffer.readu16(buf, offset)
+		local str = buffer.readstring(buf, offset + 2, len)
+		-- Add 1 to skip NULL character
+		offset += 2 + len + 1
 
 		table.insert(syms, str)
 	end
 
-	return syms
+	return syms, offset
 end
 
-local function read_irep(reader: ByteStream, debug: boolean): IREP
+local function read_irep(buf: buffer, offset: number, debug: boolean): (IREP, number)
 	-- Skip record size
-	reader:skip(4)
+	offset += 4
 
 	local irep = {} :: IREP
-	irep.num_locals = reader:read_byte(2)
-	irep.num_regs = reader:read_byte(2)
+	irep.num_locals = buffer.readu16(buf, offset)
+	irep.num_regs = buffer.readu16(buf, offset + 2)
 
-	local num_child_ireps = reader:read_byte(2)
+	local num_child_ireps = buffer.readu16(buf, offset + 4)
 
-	local num_catch_handler = reader:read_byte(2)
+	local num_catch_handler = buffer.readu16(buf, offset + 6)
 
-	local num_instructions = reader:read_byte(4)
+	local num_instructions = buffer.readu32(buf, offset + 8)
 	irep.num_instructions = num_instructions
-	irep.inst_idx = reader.cursor
+	irep.inst_idx = offset + 12
 
-	reader:skip(num_instructions)
+	offset += 12 + num_instructions
+	irep.catch_handlers, offset = read_catch_handlers(buf, offset, num_catch_handler)
 
-	irep.catch_handlers = read_catch_handlers(reader, num_catch_handler)
+	local pool_len = buffer.readu16(buf, offset)
+	irep.pool, offset = read_pool(buf, offset + 2, pool_len)
 
-	local pool_len = reader:read_byte(2)
-	irep.pool = read_pool(reader, pool_len)
-
-	local syms_len = reader:read_byte(2)
-	irep.symbols = read_syms(reader, syms_len)
-
+	local syms_len = buffer.readu16(buf, offset)
+	irep.symbols, offset = read_syms(buf, offset + 2, syms_len)
 	irep.children = {}
 	for _ = 1, num_child_ireps do
-		table.insert(irep.children, read_irep(reader, debug))
+		local children
+		children, offset = read_irep(buf, offset, debug)
+		table.insert(irep.children, children)
 	end
 
-	return irep
+	return irep, offset
 end
 
-local function load_bytecode(byte_string: string, debug: boolean): IREP
-	local reader: ByteStream = ByteStream.new(byte_string)
-	read_binary_header(reader)
+local function load_bytecode(buf: buffer, debug: boolean): IREP
+	read_binary_header(buf)
 
-	return read_irep(reader, debug)
+	return select(1, read_irep(buf, 32, debug))
 end
 
 return {

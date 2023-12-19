@@ -67,69 +67,129 @@ local function fetch_Z(vm: VM)
 end
 
 local function fetch_BB(vm: VM): (number, number)
-	local A, B, updated_pos = string.unpack(
-		`>I{if bit32.btest(vm.ext, 0x01) then 2 else 1}I{if bit32.btest(vm.ext, 0x02) then 2 else 1}`,
-		vm.inst,
-		vm.pc + 1
-	)
+	local A
+	if bit32.btest(vm.ext, 0x01) then
+		A = buffer.readu16(vm.inst, vm.pc + 1)
+		vm.pc += 3
+	else
+		A = buffer.readu8(vm.inst, vm.pc + 1)
+		vm.pc += 2
+	end
 
-	vm.pc = updated_pos
+	local B
+	if bit32.btest(vm.ext, 0x02) then
+		B = buffer.readu16(vm.inst, vm.pc)
+		vm.pc += 2
+	else
+		B = buffer.readu8(vm.inst, vm.pc)
+		vm.pc += 1
+	end
 
 	return A, B
 end
 
 local function fetch_B(vm: VM): number
-	local A, updated_pos = string.unpack(if bit32.btest(vm.ext, 0x01) then ">H" else ">B", vm.inst, vm.pc + 1)
-
-	vm.pc = updated_pos
+	local A
+	if bit32.btest(vm.ext, 0x01) then
+		A = buffer.readu16(vm.inst, vm.pc + 1)
+		vm.pc += 3
+	else
+		A = buffer.readu8(vm.inst, vm.pc + 1)
+		vm.pc += 2
+	end
 
 	return A
 end
 
 local function fetch_BBB(vm: VM): (number, number, number)
-	local A, B, C, updated_pos = string.unpack(
-		`>I{if bit32.btest(vm.ext, 0x01) then 2 else 1}I{if bit32.btest(vm.ext, 0x02) then 2 else 1}B`,
-		vm.inst,
-		vm.pc + 1
-	)
+	local A
+	if bit32.btest(vm.ext, 0x01) then
+		A = buffer.readu16(vm.inst, vm.pc + 1)
+		vm.pc += 3
+	else
+		A = buffer.readu8(vm.inst, vm.pc + 1)
+		vm.pc += 2
+	end
 
-	vm.pc = updated_pos
+	local B
+	if bit32.btest(vm.ext, 0x02) then
+		B = buffer.readu16(vm.inst, vm.pc)
+		vm.pc += 2
+	else
+		B = buffer.readu8(vm.inst, vm.pc)
+		vm.pc += 1
+	end
+
+	local C = buffer.readu8(vm.inst, vm.pc)
+	vm.pc += 1
 
 	return A, B, C
 end
 
 local function fetch_BS(vm: VM): (number, number)
-	local A, B, updated_pos = string.unpack(`>{if bit32.btest(vm.ext, 0x01) then "H" else "B"}H`, vm.inst, vm.pc + 1)
+	local A
+	if bit32.btest(vm.ext, 0x01) then
+		A = buffer.readu16(vm.inst, vm.pc + 1)
+		vm.pc += 3
+	else
+		A = buffer.readu8(vm.inst, vm.pc + 1)
+		vm.pc += 2
+	end
 
-	vm.pc = updated_pos
+	local B = buffer.readu16(vm.inst, vm.pc)
+	vm.pc += 2
+
 	return A, B
 end
 
 local function fetch_W(vm: VM): number
-	local A, updated_pos = string.unpack(">I3", vm.inst, vm.pc + 1)
-	vm.pc = updated_pos
+	-- local high = buffer.readu16(vm.inst, vm.pc + 1)
+	-- local low = buffer.readu8(vm.inst, vm.pc + 3)
+	-- vm.pc += 4
+
+	-- local A = bit32.bor(bit32.lshift(low, 16), high)
+	local A = buffer.readu32(vm.inst, vm.pc + 1)
+	A = bit32.band(A, 0xff_ff_ff)
+	vm.pc += 4
 
 	return A
 end
 
 local function fetch_Bs(vm: VM): (number, number)
-	local A, B, updated_pos = string.unpack(`>{if bit32.btest(vm.ext, 0x01) then "H" else "B"}h`, vm.inst, vm.pc + 1)
+	local A
+	if bit32.btest(vm.ext, 0x01) then
+		A = buffer.readu16(vm.inst, vm.pc + 1)
+		vm.pc += 3
+	else
+		A = buffer.readu8(vm.inst, vm.pc + 1)
+		vm.pc += 2
+	end
 
-	vm.pc = updated_pos
+	local B = buffer.readi16(vm.inst, vm.pc)
+	vm.pc += 2
+
 	return A, B
 end
 
 local function fetch_s(vm: VM): number
-	local A, updated_pos = string.unpack(`>h`, vm.inst, vm.pc + 1)
+	local A = buffer.readi16(vm.inst, vm.pc + 1)
+	vm.pc += 3
 
-	vm.pc = updated_pos
 	return A
 end
 
 local function fetch_Bi(vm: VM): (number, number)
-	local A, B, updated_pos = string.unpack(`>{if bit32.btest(vm.ext, 0x01) then "h" else "b"}i`, vm.inst, vm.pc + 1)
+	local A
+	if bit32.btest(vm.ext, 0x01) then
+		A = buffer.readu16(vm.inst, vm.pc + 1)
+		vm.pc += 3
+	else
+		A = buffer.readu8(vm.inst, vm.pc + 1)
+		vm.pc += 2
+	end
 
-	vm.pc = updated_pos
+	local B = buffer.readi32(vm.inst, vm.pc)
+	vm.pc += 4
 
 	return A, B
 end
@@ -157,7 +217,7 @@ function VM.new(debug_mode: boolean?): VM
 	return setmetatable(self, VM) :: any
 end
 
-function VM.load(vm: VM, inst: string, irep: IREP)
+function VM.load(vm: VM, inst: buffer, irep: IREP)
 	assert(inst ~= nil)
 	assert(irep ~= nil)
 
@@ -2186,7 +2246,7 @@ function VM.execute(vm: VM)
 	-- Luau doesn't support `goto` yet, so make a makeshift goto of sorts.
 	vm.should_next = true
 	while vm.should_next do
-		local inst, _ = string.unpack(">B", vm.inst, vm.pc)
+		local inst = buffer.readu8(vm.inst, vm.pc)
 	
 		local opcode = opcodes.opcodes[inst]
 		assert(opcode ~= nil, `unknown opcode {inst}`)

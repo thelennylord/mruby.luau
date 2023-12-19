@@ -125,7 +125,7 @@ end)
 
 class.alias_method(Object, "is_a?", "kind_of?")
 
-class.define_method(Object, "echo", function(state: State, argc: number)
+class.define_method(Object, "puts", function(state: State, argc: number)
 	if argc > 0 then
 		for i = 1, argc do
 			local val = state.get_register(i)
